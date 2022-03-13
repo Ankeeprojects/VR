@@ -9,10 +9,11 @@ from ryu.lib.packet import ethernet
 from ryu.lib.packet import ether_types
 
 
-class SimpleSwitch(app_manager.RyuApp):
+class Switch(app_manager.RyuApp):
+    OFP_VERSIONS = [ofproto_v1_0.OFP_VERSION]
 
     def __init__(self, *args, **kwargs):
-        super(SimpleSwitch, self).__init__(*args, **kwargs)
+        super(Switch, self).__init__(*args, **kwargs)
         self.mac_to_port = {}
 
     @set_ev_cls(ofp_event.EventOFPPacketIn, MAIN_DISPATCHER)
@@ -63,7 +64,7 @@ class SimpleSwitch(app_manager.RyuApp):
         if out_port != ofproto.OFPP_FLOOD:
             self.add_flow(datapath, msg.in_port, dst, src, actions)
 
-
+        #Reenviar o pacote de volta para o switch
         out = datapath.ofproto_parser.OFPPacketOut(
             datapath=datapath, buffer_id=msg.buffer_id, in_port=msg.in_port,
             actions=actions, data=msg.data)
@@ -72,16 +73,20 @@ class SimpleSwitch(app_manager.RyuApp):
     def add_flow(self, datapath, in_port, dst, src, actions):
         ofproto = datapath.ofproto
 
+        #Definir os parâmetros para dar match (porta de entrada, destino e source layer 2)
         match = datapath.ofproto_parser.OFPMatch(
             in_port=in_port,
             dl_dst=haddr_to_bin(dst), dl_src=haddr_to_bin(src))
 
+        #Criar e enviar o FlowMod, que adiciona um flow para os parâmetros definidos
         mod = datapath.ofproto_parser.OFPFlowMod(
             datapath=datapath, match=match, cookie=0,
             command=ofproto.OFPFC_ADD, idle_timeout=0, hard_timeout=0,
             priority=ofproto.OFP_DEFAULT_PRIORITY,
             flags=ofproto.OFPFF_SEND_FLOW_REM, actions=actions)
         datapath.send_msg(mod)
+
+        #codigo useful no futuro
 """
     @set_ev_cls(ofp_event.EventOFPPortStatus, MAIN_DISPATCHER)
     def _port_status_handler(self, ev):
