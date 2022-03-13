@@ -56,11 +56,13 @@ class SimpleSwitch(app_manager.RyuApp):
             #Flood se não estiver
             out_port = ofproto.OFPP_FLOOD
 
+        #Definir action como enviar pela porta escolhida
         actions = [datapath.ofproto_parser.OFPActionOutput(out_port)]
 
-        # install a flow to avoid packet_in next time
+        #Se o destino for conhecido, adicionar o flow ao switch
         if out_port != ofproto.OFPP_FLOOD:
             self.add_flow(datapath, msg.in_port, dst, src, actions)
+
 
         out = datapath.ofproto_parser.OFPPacketOut(
             datapath=datapath, buffer_id=msg.buffer_id, in_port=msg.in_port,
