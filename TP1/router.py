@@ -10,6 +10,7 @@ from ryu.lib.packet import ethernet
 from ryu.lib.packet import ipv4
 from ryu.lib.packet import arp
 from ryu.lib.packet import ether_types
+import ipaddress
 
 
 #inicializar ryu em port definida - sudo ryu-manager --ofp-tcp-listen-port 6654 router.py
@@ -25,6 +26,13 @@ class Router(app_manager.RyuApp):
             "10.0.2.254" : ("ff:ff:ff:00:00:02", 2),
             "10.0.3.254" : ("ff:ff:ff:00:00:03", 3)
         }
+        self.buffer = dict()
+        self.arp_helper = [
+            ['10.0.1.0/24', '10.0.1.254'],
+            ['10.0.2.0/24', '10.0.2.254'],
+            ['10.0.3.0/24', '10.0.3.254']
+        ]
+
 
     def process_arp(self, datapath, packet:packet, ether_frame:ethernet, in_port:int) -> None:
         arp_packet = packet.get_protocol(arp.arp)
@@ -48,14 +56,6 @@ class Router(app_manager.RyuApp):
         self.logger.info(f"ARP REQUEST {ether_frame.src} a vir de {in_port}. O IP do gajo é {dst_ip} e o que lhe vou dar é o {src_ip}")
         self.logger.info(f"Vou enviar resposta com o mac {src_mac}, vai sair pela {in_port}")
         
-        """
-        if opcode == 1:
-            targetMac = "00:00:00:00:00:00"
-            targetIp = dstIp
-        elif opcode == 2:
-            targetMac = dstMac
-            targetIp = dstIp
-        """
 
         e = ethernet.ethernet(ether_frame.src, src_mac, ether.ETH_TYPE_ARP)
         a = arp.arp(1, 0x0800, 6, 4, 2, src_mac, src_ip, ether_frame.src, dst_ip)
@@ -99,55 +99,29 @@ class Router(app_manager.RyuApp):
         else:
             if network:
                 self.logger.info(f"O pacote é do {network.src}")
+                self.process_ip(datapath, pkt, network)
         #self.logger.info(network)
 
         if eth.ethertype == ether_types.ETH_TYPE_LLDP:
             # Ignorar pacotes LLDP
             return
 
-
-        """
-        dst = eth.dst
-        src = eth.src
-
-        #ID do switch
-        dpid = datapath.id
-
-        #Adiciona entrada no dicionário se o switch não tiver comunicado anteriormente
-        self.mac_to_port.setdefault(dpid, {})
-
-        #self.logger.info("packet in %s %s %s %s", dpid, src, dst, msg.in_port)
-
-        #Associa endereço MAC a porta do switch
-        self.mac_to_port[dpid][src] = msg.in_port
-
-        #Avalia se o destino já está na tabela
-        if dst in self.mac_to_port[dpid]:
-            out_port = self.mac_to_port[dpid][dst]
-        else:
-            #Flood se não estiver
-            out_port = ofproto.OFPP_FLOOD
-
-        #Definir action como enviar pela porta escolhida
-        actions = [datapath.ofproto_parser.OFPActionOutput(out_port)]
-
-        #Se o destino for conhecido, adicionar o flow ao switch
-        if out_port != ofproto.OFPP_FLOOD:
-            self.add_flow(datapath, msg.in_port, dst, src, actions)
-
-        #Reenviar o pacote de volta para o switch
-        out = datapath.ofproto_parser.OFPPacketOut(
-            datapath=datapath, buffer_id=msg.buffer_id, in_port=msg.in_port,
-            actions=actions, data=msg.data)
-        datapath.send_msg(out)
-        """
+    def process_ip(self, datapath, packet:packet, network) -> None:
+        #self.logger.info(network['dst'])
         
-    def add_flow(self, datapath, in_port, dst, src, actions):
+        for subnet,mac in self.arp_helper:
+            if ipaddress.IPv4Address(network.dst) in ipaddress.IPv4Network(subnet):
+                self.logger.info(f"O IP {network.dst} está na subnet {subnet}, vou mandar ARP request com o mac {mac}")
+                
+                self.buffer.setdefault(network.dst, [])
+                self.buffer[network.dst].append(packet)
+        #self.add_flow()
+
+    def add_flow(self, datapath, dst, src, actions):
         ofproto = datapath.ofproto
 
         #Definir os parâmetros para dar match (porta de entrada, destino e source layer 2)
         match = datapath.ofproto_parser.OFPMatch(
-            in_port=in_port,
             dl_dst=haddr_to_bin(dst), dl_src=haddr_to_bin(src))
 
         #Criar e enviar o FlowMod, que adiciona um flow para os parâmetros definidos acima
