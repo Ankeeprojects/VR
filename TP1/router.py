@@ -57,11 +57,8 @@ class Router(app_manager.RyuApp):
     def process_arp_reply(self, datapath, arp_packet, in_port):
         self.arp_table[arp_packet.src_ip] = (arp_packet.src_mac, in_port)
 
-        actions = [ 
-                datapath.ofproto_parser.OFPActionSetDlSrc(arp_packet.dst_mac),
-                datapath.ofproto_parser.OFPActionSetDlDst(arp_packet.src_mac),
-                datapath.ofproto_parser.OFPActionOutput(in_port, 0)]
-
+        self.add_flow(datapath, arp_packet.src_ip, arp_packet.dst_mac, arp_packet.src_mac, in_port)
+       
         for packet in self.buffer[arp_packet.src_ip]:
             self.send_ip(datapath, packet, in_port, arp_packet.dst_mac, arp_packet.src_mac)
 
@@ -182,13 +179,21 @@ class Router(app_manager.RyuApp):
             actions=actions,
             data=p.data)
         datapath.send_msg(out)
-
-    def add_flow(self, datapath, dst, src, actions):
+ 
+ #self.add_flow(datapath, arp_packet.src_ip, arp_packet.dst_mac, arp_packet.src_mac, in_port)
+    def add_flow(self, datapath, dst_ip, src_mac, dst_mac, port):
         ofproto = datapath.ofproto
 
+        self.logger.info(f"Vou enviar um flowmod para quando receber um pacote para o {dst_ip}, vai sai pela porta {port}, srcmac {src_mac}, dstmac {dst_mac}")
         #Definir os parâmetros para dar match (porta de entrada, destino e source layer 2)
         match = datapath.ofproto_parser.OFPMatch(
-            dl_dst=haddr_to_bin(dst), dl_src=haddr_to_bin(src))
+                nw_dst=haddr_to_bin(dst_ip)
+            )
+
+        actions = [ 
+                datapath.ofproto_parser.OFPActionSetDlSrc(src_mac),
+                datapath.ofproto_parser.OFPActionSetDlDst(dst_mac),
+                datapath.ofproto_parser.OFPActionOutput(port, 0)]
 
         #Criar e enviar o FlowMod, que adiciona um flow para os parâmetros definidos acima
         mod = datapath.ofproto_parser.OFPFlowMod(
