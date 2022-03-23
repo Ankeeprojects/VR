@@ -10,6 +10,7 @@ from ryu.lib.packet import ethernet
 from ryu.lib.packet import ipv4
 from ryu.lib.packet import arp
 from ryu.lib.packet import ether_types
+from ryu.lib.packet import icmp
 import ipaddress
 
 
@@ -122,28 +123,30 @@ class Router(app_manager.RyuApp):
         #Informação de ethernet
         eth = pkt.get_protocol(ethernet.ethernet)
         network = pkt.get_protocol(ipv4.ipv4)
-        
         #self.logger.info(f"\n\n\n RECEBI O PACOTE {msg}\n\n")
-
-        if eth.ethertype == ether_types.ETH_TYPE_ARP:
-            self.logger.info(pkt.get_protocol(arp.arp))
-            #self.logger.info(f"{type(datapath)}\n{type(pkt)}\n{type(eth)}\n{type(msg.in_port)}")
-            self.process_arp(datapath, pkt, eth, msg.in_port)
-        else:
-            if network:
-                self.logger.info(f"O pacote é {network}")
-                self.process_ip(datapath, pkt, network)
-        #self.logger.info(network)
 
         if eth.ethertype == ether_types.ETH_TYPE_LLDP:
             # Ignorar pacotes LLDP
             return
 
-    def process_ip(self, datapath, packet:packet, network) -> None:
+        if eth.ethertype == ether_types.ETH_TYPE_ARP:
+            self.logger.info(pkt.get_protocol(arp.arp))
+            #self.logger.info(f"{type(datapath)}\n{type(pkt)}\n{type(eth)}\n{type(msg.in_port)}")
+            self.process_arp(datapath, pkt, eth, msg.in_port)
+        elif network and network.proto == 1:
+                self.logger.info(f"O pacote é ICMP MAN")
+                self.logger.info(f"O pacote é {network}")
+
+                self.process_icmp(datapath, pkt, network)
+        #self.logger.info(network)
+
+        
+    def process_icmp(self, datapath, packet:packet, network) -> None:
         #self.logger.info(network['dst'])
 
 
         self.logger.info(f"INFO DA TABELA: {self.arp_table}")
+
         if network.dst in self.arp_table:
             arp_info = self.arp_table[network.dst]
             self.logger.info(f"O {network.dst} ESTÁ NA TABELA")
