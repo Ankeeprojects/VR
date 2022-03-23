@@ -137,25 +137,39 @@ class Router(app_manager.RyuApp):
                 self.logger.info(f"O pacote é ICMP MAN")
                 self.logger.info(f"O pacote é {network}")
 
-                self.process_icmp(datapath, pkt, network)
+                self.process_icmp(datapath, pkt, network, eth, msg.in_port)
         #self.logger.info(network)
 
+    def reply_icmp(self, datapath, icmp_pkt, network, eth, port):
+        if network.src not in self.arp_table:
+            self.find_arp(datapath, network)
+
+        e = ethernet.ethernet(src=eth.dst, dst=eth.src, ethertype=eth.ethertype)
         
-    def process_icmp(self, datapath, packet:packet, network) -> None:
-        #self.logger.info(network['dst'])
+        i = ipv4.ipv4(src=network.dst, dst=network.src, proto=network.proto)
 
+        icmp_header = icmp.icmp(type_=icmp.ICMP_ECHO_REPLY,
+                                   code=icmp.ICMP_ECHO_REPLY_CODE,
+                                   csum=0,
+                                   data=icmp_pkt.data)
+        p = packet.Packet()
+        p.add_protocol(e)
+        p.add_protocol(i)
+        p.add_protocol(icmp_header)
+        p.serialize()
 
-        self.logger.info(f"INFO DA TABELA: {self.arp_table}")
+        self.logger.info(f"\n\nO pacote ICMP REPLY vai para o {network.src} e o cabeçalho é o {icmp_header}\n\n")
+        actions = [datapath.ofproto_parser.OFPActionOutput(port, 0)]
+        out = datapath.ofproto_parser.OFPPacketOut(
+            datapath=datapath,
+            buffer_id=0xffffffff,
+            in_port=datapath.ofproto.OFPP_CONTROLLER,
+            actions=actions,
+            data=p.data)
+        datapath.send_msg(out)
 
-        if network.dst in self.arp_table:
-            arp_info = self.arp_table[network.dst]
-            self.logger.info(f"O {network.dst} ESTÁ NA TABELA")
-            for subnet,ip,port in self.arp_helper:
-                if ipaddress.IPv4Address(network.dst) in ipaddress.IPv4Network(subnet):
-                    self.send_ip(datapath, packet, arp_info[1], self.interfaces[ip], arp_info[0])
-                    break
-        else:
-            for subnet,ip,port in self.arp_helper:
+    def find_arp(self, datapath, network) -> int:
+        for subnet,ip,port in self.arp_helper:
                 if ipaddress.IPv4Address(network.dst) in ipaddress.IPv4Network(subnet):
                     self.logger.info(f"O IP {network.dst} está na subnet {subnet}, vou mandar ARP request com o endereço {ip} com mac {self.interfaces[ip]} e vai sair pela porta {port}")
                     
@@ -163,8 +177,28 @@ class Router(app_manager.RyuApp):
                     self.buffer[network.dst].append(packet)
 
                     self.send_arp(datapath, network.dst, ip, port, self.interfaces[ip])
-            #self.add_flow()
+                    return port
 
+
+    def process_icmp(self, datapath, packet:packet, network, eth, port) -> None:
+        #self.logger.info(network['dst'])
+
+        self.logger.info(f"INFO DA TABELA: {self.arp_table}")
+
+        if network.dst in self.interfaces:
+            self.logger.info(f"O PING É PARA MIM, NA INTERFACE {network.dst} mac {self.interfaces[network.dst]}")
+            self.reply_icmp(datapath, packet.get_protocol(icmp.icmp), network, eth, port)
+        elif network.dst in self.arp_table:
+            arp_info = self.arp_table[network.dst]
+            self.logger.info(f"O {network.dst} ESTÁ NA TABELA")
+            for subnet,ip,port in self.arp_helper:
+                if ipaddress.IPv4Address(network.dst) in ipaddress.IPv4Network(subnet):
+                    self.send_ip(datapath, packet, arp_info[1], self.interfaces[ip], arp_info[0])
+                    break
+        else:
+            self.find_arp(datapath, network)
+            
+    
     def send_arp(self, datapath, dst_ip, src_ip, port, src_mac):
         e = ethernet.ethernet(src=src_mac, dst='ff:ff:ff:ff:ff:ff', ethertype=ether.ETH_TYPE_ARP)
         a = arp.arp(hwtype=1, proto=0x0800, hlen=6, plen=4, opcode=1, src_mac=src_mac, src_ip=src_ip, dst_mac='00:00:00:00:00:00', dst_ip=dst_ip)
