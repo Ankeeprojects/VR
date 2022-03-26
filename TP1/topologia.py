@@ -30,10 +30,10 @@ class Topologia(Topo):
 
 
         # Adding switches
-        s1 = self.addSwitch('s1', dpid="0000000000000001")
-        s2 = self.addSwitch('s2', dpid="0000000000000002")
-        s3 = self.addSwitch('s3', dpid="0000000000000003")
-        s4 = self.addSwitch('s4', dpid="0000000000000004")
+        s1 = self.addSwitch('s1', dpid="0000000000000001", protocols="OpenFlow13")
+        s2 = self.addSwitch('s2', dpid="0000000000000002", protocols="OpenFlow13")
+        s3 = self.addSwitch('s3', dpid="0000000000000003", protocols="OpenFlow13")
+        s4 = self.addSwitch('s4', dpid="0000000000000004", protocols="OpenFlow13")
 
         #def 	addLink (self, node1, node2, port1=None, port2=None, cls=None, **params)
        

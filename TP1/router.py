@@ -1,8 +1,8 @@
 from ryu.base import app_manager
 from ryu.controller import ofp_event
-from ryu.controller.handler import MAIN_DISPATCHER
+from ryu.controller.handler import MAIN_DISPATCHER, CONFIG_DISPATCHER
 from ryu.controller.handler import set_ev_cls
-from ryu.ofproto import ofproto_v1_0
+from ryu.ofproto import ofproto_v1_3
 from ryu.ofproto import ether
 from ryu.lib.mac import haddr_to_bin
 from ryu.lib.packet import packet
@@ -17,7 +17,7 @@ import ipaddress
 #inicializar ryu em port definida - sudo ryu-manager --ofp-tcp-listen-port 6654 router.py
 
 class Router(app_manager.RyuApp):
-    OFP_VERSIONS = [ofproto_v1_0.OFP_VERSION]
+    OFP_VERSIONS = [ofproto_v1_3.OFP_VERSION]
 
     def __init__(self, *args, **kwargs):
         super(Router, self).__init__(*args, **kwargs)
@@ -37,11 +37,24 @@ class Router(app_manager.RyuApp):
 
         self.arp_table = dict()
 
+    @set_ev_cls(ofp_event.EventOFPSwitchFeatures, CONFIG_DISPATCHER)
+    def switch_features_handler(self, ev):
+        datapath = ev.msg.datapath
+        ofproto = datapath.ofproto
+        parser = datapath.ofproto_parser
+
+        # install the table-miss flow entry.
+        match = parser.OFPMatch()
+        actions = [parser.OFPActionOutput(ofproto.OFPP_CONTROLLER,
+                                          ofproto.OFPCML_NO_BUFFER)]
+        self.add_flow(datapath, 0, match, actions)
 
     def process_arp(self, datapath, packet:packet, ether_frame:ethernet, in_port:int) -> None:
         arp_packet = packet.get_protocol(arp.arp)
 
         if arp_packet.opcode == 1: 
+            self.logger.info("RECEBI UM PACOTE ARP!!!!!")
+
             dst_ip = arp_packet.dst_ip
             mac = self.interfaces.get(dst_ip)
 
@@ -57,9 +70,20 @@ class Router(app_manager.RyuApp):
 
     def process_arp_reply(self, datapath, arp_packet, in_port):
         self.arp_table[arp_packet.src_ip] = (arp_packet.src_mac, in_port)
+        
+        self.logger.info(f"Vou enviar um flowmod para quando receber um pacote para o {arp_packet.src_ip}, vai sai pela porta {in_port}, srcmac {arp_packet.src_mac}, dstmac {arp_packet.dst_mac}")
+        #Definir os parâmetros para dar match (porta de entrada, destino e source layer 2)
 
-        self.add_flow(datapath, arp_packet.src_ip, arp_packet.dst_mac, arp_packet.src_mac, in_port)
-       
+        match = datapath.ofproto_parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP, 
+                                                    ipv4_dst=arp_packet.src_ip)
+
+        actions = [ 
+                datapath.ofproto_parser.OFPActionSetField(eth_src=arp_packet.dst_mac),
+                datapath.ofproto_parser.OFPActionSetField(eth_dst=arp_packet.src_mac),
+                datapath.ofproto_parser.OFPActionOutput(in_port, 0)]
+
+        self.add_flow(datapath, 32768, match, actions)
+
         for packet in self.buffer[arp_packet.src_ip]:
             self.send_ip(datapath, packet, in_port, arp_packet.dst_mac, arp_packet.src_mac)
 
@@ -69,8 +93,8 @@ class Router(app_manager.RyuApp):
 
         self.logger.info(f"\n\n\nEstou a enviar um pacote {packet} pela {in_port}, para o {dst_mac}, a partir da {src_mac}\n\n\n")
         actions = [ 
-                datapath.ofproto_parser.OFPActionSetDlSrc(src_mac),
-                datapath.ofproto_parser.OFPActionSetDlDst(dst_mac),
+                datapath.ofproto_parser.OFPActionSetField(eth_dst=dst_mac),
+                datapath.ofproto_parser.OFPActionSetField(eth_src=src_mac),
                 datapath.ofproto_parser.OFPActionOutput(in_port, 0)]
 
         out = datapath.ofproto_parser.OFPPacketOut(
@@ -78,7 +102,7 @@ class Router(app_manager.RyuApp):
             buffer_id=0xffffffff,
             in_port=datapath.ofproto.OFPP_CONTROLLER,
             actions=actions,
-            data=packet.data)
+            data=packet)
         datapath.send_msg(out)
     
     
@@ -132,17 +156,18 @@ class Router(app_manager.RyuApp):
         if eth.ethertype == ether_types.ETH_TYPE_ARP:
             self.logger.info(pkt.get_protocol(arp.arp))
             #self.logger.info(f"{type(datapath)}\n{type(pkt)}\n{type(eth)}\n{type(msg.in_port)}")
-            self.process_arp(datapath, pkt, eth, msg.in_port)
+            self.process_arp(datapath, pkt, eth, msg.match['in_port'])
         elif network and network.proto == 1:
                 self.logger.info(f"O pacote é ICMP MAN")
                 self.logger.info(f"O pacote é {network}")
 
-                self.process_icmp(datapath, pkt, network, eth, msg.in_port)
+                self.process_icmp(datapath, pkt, network, eth, msg.match['in_port'])
         #self.logger.info(network)
 
-    def reply_icmp(self, datapath, icmp_pkt, network, eth, port):
+    def reply_icmp(self, datapath, icmp_pkt, network, eth, port, packet):
+        """
         if network.src not in self.arp_table:
-            self.find_arp(datapath, network)
+            self.find_arp(datapath, network, packet)
 
         e = ethernet.ethernet(src=eth.dst, dst=eth.src, ethertype=eth.ethertype)
         
@@ -157,18 +182,24 @@ class Router(app_manager.RyuApp):
         p.add_protocol(i)
         p.add_protocol(icmp_header)
         p.serialize()
+        
+        self.logger.info(f"\n\nO pacote ICMP REPLY vai para o {type(network.src)} e o cabeçalho é o {icmp_header}\n\n")
+        """
+        actions = [ 
+                datapath.ofproto_parser.OFPActionSetField(eth_dst=eth.src),
+                datapath.ofproto_parser.OFPActionSetField(eth_src=eth.dst),
+                datapath.ofproto_parser.OFPActionOutput(port, 0)]
 
-        self.logger.info(f"\n\nO pacote ICMP REPLY vai para o {network.src} e o cabeçalho é o {icmp_header}\n\n")
-        actions = [datapath.ofproto_parser.OFPActionOutput(port, 0)]
+        #actions = [datapath.ofproto_parser.datapath.ofproto_parser.OFPActionOutput(port, 0)]
         out = datapath.ofproto_parser.OFPPacketOut(
             datapath=datapath,
             buffer_id=0xffffffff,
             in_port=datapath.ofproto.OFPP_CONTROLLER,
             actions=actions,
-            data=p.data)
+            data=packet)
         datapath.send_msg(out)
 
-    def find_arp(self, datapath, network) -> int:
+    def find_arp(self, datapath, network, packet) -> int:
         for subnet,ip,port in self.arp_helper:
                 if ipaddress.IPv4Address(network.dst) in ipaddress.IPv4Network(subnet):
                     self.logger.info(f"O IP {network.dst} está na subnet {subnet}, vou mandar ARP request com o endereço {ip} com mac {self.interfaces[ip]} e vai sair pela porta {port}")
@@ -187,7 +218,7 @@ class Router(app_manager.RyuApp):
 
         if network.dst in self.interfaces:
             self.logger.info(f"O PING É PARA MIM, NA INTERFACE {network.dst} mac {self.interfaces[network.dst]}")
-            self.reply_icmp(datapath, packet.get_protocol(icmp.icmp), network, eth, port)
+            self.reply_icmp(datapath, packet.get_protocol(icmp.icmp), network, eth, port, packet)
         elif network.dst in self.arp_table:
             arp_info = self.arp_table[network.dst]
             self.logger.info(f"O {network.dst} ESTÁ NA TABELA")
@@ -196,7 +227,7 @@ class Router(app_manager.RyuApp):
                     self.send_ip(datapath, packet, arp_info[1], self.interfaces[ip], arp_info[0])
                     break
         else:
-            self.find_arp(datapath, network)
+            self.find_arp(datapath, network, packet)
             
     
     def send_arp(self, datapath, dst_ip, src_ip, port, src_mac):
@@ -218,26 +249,17 @@ class Router(app_manager.RyuApp):
         datapath.send_msg(out)
  
  #self.add_flow(datapath, arp_packet.src_ip, arp_packet.dst_mac, arp_packet.src_mac, in_port)
-    def add_flow(self, datapath, dst_ip, src_mac, dst_mac, port):
+    def add_flow(self, datapath, priority, match, actions):
         ofproto = datapath.ofproto
+        parser = datapath.ofproto_parser
 
-        self.logger.info(f"Vou enviar um flowmod para quando receber um pacote para o {dst_ip}, vai sai pela porta {port}, srcmac {src_mac}, dstmac {dst_mac}")
-        #Definir os parâmetros para dar match (porta de entrada, destino e source layer 2)
-        match = datapath.ofproto_parser.OFPMatch(
-                nw_dst=haddr_to_bin(dst_ip)
-            )
+        self.logger.info("\nESTOU A INSTALAR UM FLOW!!!!!\n")
 
-        actions = [ 
-                datapath.ofproto_parser.OFPActionSetDlSrc(src_mac),
-                datapath.ofproto_parser.OFPActionSetDlDst(dst_mac),
-                datapath.ofproto_parser.OFPActionOutput(port, 0)]
-
-        #Criar e enviar o FlowMod, que adiciona um flow para os parâmetros definidos acima
-        mod = datapath.ofproto_parser.OFPFlowMod(
-            datapath=datapath, match=match, cookie=0,
-            command=ofproto.OFPFC_ADD, idle_timeout=0, hard_timeout=0,
-            priority=ofproto.OFP_DEFAULT_PRIORITY,
-            flags=ofproto.OFPFF_SEND_FLOW_REM, actions=actions)
+        # construct flow_mod message and send it.
+        inst = [parser.OFPInstructionActions(ofproto.OFPIT_APPLY_ACTIONS,
+                                             actions)]
+        mod = parser.OFPFlowMod(datapath=datapath, priority=priority,
+                                match=match, instructions=inst)
         datapath.send_msg(mod)
 
         #codigo useful no futuro
