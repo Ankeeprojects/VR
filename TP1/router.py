@@ -185,12 +185,24 @@ class Router(app_manager.RyuApp):
         
         self.logger.info(f"\n\nO pacote ICMP REPLY vai para o {type(network.src)} e o cabeçalho é o {icmp_header}\n\n")
         """
+        match = datapath.ofproto_parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP, 
+                                                    ipv4_dst=network.dst, 
+                                                    ipv4_src=network.src,
+                                                    ip_proto=1, icmpv4_type=8)
         actions = [ 
+                datapath.ofproto_parser.OFPActionSetField(ipv4_dst=network.src),
+                datapath.ofproto_parser.OFPActionSetField(ipv4_src=network.dst),
                 datapath.ofproto_parser.OFPActionSetField(eth_dst=eth.src),
                 datapath.ofproto_parser.OFPActionSetField(eth_src=eth.dst),
-                datapath.ofproto_parser.OFPActionOutput(port, 0)]
+                datapath.ofproto_parser.OFPActionSetField(icmpv4_type=0),
+                datapath.ofproto_parser.OFPActionSetField(icmpv4_code=0),
+                datapath.ofproto_parser.OFPActionOutput(datapath.ofproto.OFPP_IN_PORT)]
 
-        #actions = [datapath.ofproto_parser.datapath.ofproto_parser.OFPActionOutput(port, 0)]
+        actions2 = [datapath.ofproto_parser.OFPActionSetField(ipv4_dst=network.src),
+                datapath.ofproto_parser.OFPActionSetField(ipv4_src=network.dst),
+                datapath.ofproto_parser.OFPActionOutput(1)]
+        self.add_flow(datapath, 32768, match, actions)
+        
         out = datapath.ofproto_parser.OFPPacketOut(
             datapath=datapath,
             buffer_id=0xffffffff,
