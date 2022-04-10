@@ -22,8 +22,9 @@ class Router(app_manager.RyuApp):
     def __init__(self, *args, **kwargs):
         super(Router, self).__init__(*args, **kwargs)
         
-        self.interfaces = dict()
         self.mac_to_port = {}
+        self.interfaces = dict()
+        
         self.interfaces[4] = {
             "10.0.1.254" : "ff:ff:ff:00:00:01", 
             "10.0.2.254" : "ff:ff:ff:00:00:02",
@@ -37,29 +38,46 @@ class Router(app_manager.RyuApp):
             "10.0.6.1" : "ff:ff:ff:00:00:07"
         }
 
+        self.interfaces[7] = {
+            "10.0.7.254" : "ff:ff:ff:00:00:08", 
+            "10.0.8.254" : "ff:ff:ff:00:00:09",
+            "10.0.6.2" : "ff:ff:ff:00:00:0a"
+        }
+
         self.buffer = dict()
         
         self.buffer[4] = dict()
         self.buffer[5] = dict()
+        self.buffer[7] = dict()
+
 
         self.arp_helper = dict()
 
         self.arp_helper[4] = [
             ['10.0.1.0/24', '10.0.1.254', 1],
             ['10.0.2.0/24', '10.0.2.254', 2],
-            ['10.0.3.0/24', '10.0.3.254', 3]
+            ['10.0.3.0/24', '10.0.3.254', 3],
+            ['10.0.4.0/24', '10.0.4.1', 4]
+            
         ]
 
         self.arp_helper[5] = [
             ['10.0.4.0/24', '10.0.4.2', 1],
             ['10.0.5.0/24', '10.0.5.254', 2],
-            ['10.0.6.0/24', '10.0.6.254', 3]
+            ['10.0.6.0/24', '10.0.6.1', 3]
+        ]
+
+        self.arp_helper[7] = [
+            ['10.0.6.0/24', '10.0.6.2', 1],
+            ['10.0.7.0/24', '10.0.7.254', 2],
+            ['10.0.8.0/24', '10.0.8.254', 3]
         ]
 
         self.arp_table = dict()
 
         self.arp_table[4] = dict()
         self.arp_table[5] = dict()
+        self.arp_table[7] = dict()
 
 
     @set_ev_cls(ofp_event.EventOFPSwitchFeatures, CONFIG_DISPATCHER)
