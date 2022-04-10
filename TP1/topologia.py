@@ -20,9 +20,11 @@ class Topologia(Topo):
         h1 = self.addHost('h1', ip="10.0.1.1/24", defaultRoute = "via 10.0.1.254")
         h2 = self.addHost('h2', ip="10.0.1.2/24", defaultRoute = "via 10.0.1.254")
         h3 = self.addHost('h3', ip="10.0.1.3/24", defaultRoute = "via 10.0.1.254")
+
         h4 = self.addHost('h4', ip="10.0.2.1/24", defaultRoute = "via 10.0.2.254")
         h5 = self.addHost('h5', ip="10.0.2.2/24", defaultRoute = "via 10.0.2.254")
         h6 = self.addHost('h6', ip="10.0.2.3/24", defaultRoute = "via 10.0.2.254")
+        
         h7 = self.addHost('h7', ip="10.0.3.1/24", defaultRoute = "via 10.0.3.254")
         h8 = self.addHost('h8', ip="10.0.3.2/24", defaultRoute = "via 10.0.3.254")
         h9 = self.addHost('h9', ip="10.0.3.3/24", defaultRoute = "via 10.0.3.254")
@@ -31,6 +33,10 @@ class Topologia(Topo):
         h11 = self.addHost('h11', ip="10.0.5.11/24", defaultRoute = "via 10.0.5.254")
         
         h12 = self.addHost('h12', ip="10.0.7.12/24", defaultRoute = "via 10.0.7.254")
+        h13 = self.addHost('h13', ip="10.0.7.13/24", defaultRoute = "via 10.0.7.254")
+        
+        h14 = self.addHost('h14', ip="10.0.8.14/24", defaultRoute = "via 10.0.8.254")
+        h15 = self.addHost('h15', ip="10.0.8.15/24", defaultRoute = "via 10.0.8.254")
         
         #self.h10 = self.addHost('h10', ip="10.0.1.69/24", defaultRoute = "via 10.0.1.254")
 
@@ -43,6 +49,8 @@ class Topologia(Topo):
         s6 = self.addSwitch('s6', dpid="0000000000000006", protocols="OpenFlow13")
         s7 = self.addSwitch('s7', dpid="0000000000000007", protocols="OpenFlow13")
         s8 = self.addSwitch('s8', dpid="0000000000000008", protocols="OpenFlow13")
+        s9 = self.addSwitch('s9', dpid="0000000000000009", protocols="OpenFlow13")
+        
         #def 	addLink (self, node1, node2, port1=None, port2=None, cls=None, **params)
 
 
@@ -76,3 +84,10 @@ class Topologia(Topo):
         self.addLink(s7, s8)
 
         self.addLink(s8, h12)
+        self.addLink(s8, h13)
+        
+        self.addLink(s7, s9)
+
+        self.addLink(s9, h14)
+        self.addLink(s9, h15)
+        
