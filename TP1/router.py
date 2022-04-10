@@ -21,21 +21,46 @@ class Router(app_manager.RyuApp):
 
     def __init__(self, *args, **kwargs):
         super(Router, self).__init__(*args, **kwargs)
+        
+        self.interfaces = dict()
         self.mac_to_port = {}
-        self.interfaces = {
+        self.interfaces[4] = {
             "10.0.1.254" : "ff:ff:ff:00:00:01", 
             "10.0.2.254" : "ff:ff:ff:00:00:02",
-            "10.0.3.254" : "ff:ff:ff:00:00:03"
+            "10.0.3.254" : "ff:ff:ff:00:00:03",
+            "10.0.4.1" : "ff:ff:ff:00:00:04"
+        }
+        
+        self.interfaces[5] = {
+            "10.0.4.2" : "ff:ff:ff:00:00:05", 
+            "10.0.5.254" : "ff:ff:ff:00:00:06",
+            "10.0.6.1" : "ff:ff:ff:00:00:07"
         }
 
         self.buffer = dict()
-        self.arp_helper = [
+        
+        self.buffer[4] = dict()
+        self.buffer[5] = dict()
+
+        self.arp_helper = dict()
+
+        self.arp_helper[4] = [
             ['10.0.1.0/24', '10.0.1.254', 1],
             ['10.0.2.0/24', '10.0.2.254', 2],
             ['10.0.3.0/24', '10.0.3.254', 3]
         ]
 
+        self.arp_helper[5] = [
+            ['10.0.4.0/24', '10.0.4.2', 1],
+            ['10.0.5.0/24', '10.0.5.254', 2],
+            ['10.0.6.0/24', '10.0.6.254', 3]
+        ]
+
         self.arp_table = dict()
+
+        self.arp_table[4] = dict()
+        self.arp_table[5] = dict()
+
 
     @set_ev_cls(ofp_event.EventOFPSwitchFeatures, CONFIG_DISPATCHER)
     def switch_features_handler(self, ev):
@@ -56,7 +81,7 @@ class Router(app_manager.RyuApp):
             self.logger.info("RECEBI UM PACOTE ARP!!!!!")
 
             dst_ip = arp_packet.dst_ip
-            mac = self.interfaces.get(dst_ip)
+            mac = self.interfaces[datapath.id].get(dst_ip)
 
             if mac:
                 self.arp_reply(datapath, ether_frame, mac, arp_packet, in_port)
@@ -69,7 +94,7 @@ class Router(app_manager.RyuApp):
             self.process_arp_reply(datapath, arp_packet, in_port)
 
     def process_arp_reply(self, datapath, arp_packet, in_port):
-        self.arp_table[arp_packet.src_ip] = (arp_packet.src_mac, in_port)
+        self.arp_table[datapath.id][arp_packet.src_ip] = (arp_packet.src_mac, in_port)
         
         self.logger.info(f"Vou enviar um flowmod para quando receber um pacote para o {arp_packet.src_ip}, vai sai pela porta {in_port}, srcmac {arp_packet.src_mac}, dstmac {arp_packet.dst_mac}")
         #Definir os parâmetros para dar match (porta de entrada, destino e source layer 2)
@@ -84,7 +109,7 @@ class Router(app_manager.RyuApp):
 
         self.add_flow(datapath, 32768, match, actions)
 
-        for packet in self.buffer[arp_packet.src_ip]:
+        for packet in self.buffer[datapath.id][arp_packet.src_ip]:
             self.send_ip(datapath, packet, in_port, arp_packet.dst_mac, arp_packet.src_mac)
 
     def send_ip(self, datapath, packet, in_port, src_mac, dst_mac):
@@ -212,31 +237,31 @@ class Router(app_manager.RyuApp):
         datapath.send_msg(out)
 
     def find_arp(self, datapath, network, packet) -> int:
-        for subnet,ip,port in self.arp_helper:
+        for subnet,ip,port in self.arp_helper[datapath.id]:
                 if ipaddress.IPv4Address(network.dst) in ipaddress.IPv4Network(subnet):
-                    self.logger.info(f"O IP {network.dst} está na subnet {subnet}, vou mandar ARP request com o endereço {ip} com mac {self.interfaces[ip]} e vai sair pela porta {port}")
+                    self.logger.info(f"O IP {network.dst} está na subnet {subnet}, vou mandar ARP request com o endereço {ip} com mac {self.interfaces[datapath.id][ip]} e vai sair pela porta {port}")
                     
-                    self.buffer.setdefault(network.dst, [])
-                    self.buffer[network.dst].append(packet)
+                    self.buffer[datapath.id].setdefault(network.dst, [])
+                    self.buffer[datapath.id][network.dst].append(packet)
 
-                    self.send_arp(datapath, network.dst, ip, port, self.interfaces[ip])
+                    self.send_arp(datapath, network.dst, ip, port, self.interfaces[datapath.id][ip])
                     return port
 
 
     def process_icmp(self, datapath, packet:packet, network, eth, port) -> None:
         #self.logger.info(network['dst'])
 
-        self.logger.info(f"INFO DA TABELA: {self.arp_table}")
+        self.logger.info(f"INFO DA TABELA: {self.arp_table[datapath.id]}")
 
-        if network.dst in self.interfaces:
-            self.logger.info(f"O PING É PARA MIM, NA INTERFACE {network.dst} mac {self.interfaces[network.dst]}")
+        if network.dst in self.interfaces[datapath.id]:
+            self.logger.info(f"O PING É PARA MIM, NA INTERFACE {network.dst} mac {self.interfaces[datapath.id][network.dst]}")
             self.reply_icmp(datapath, packet.get_protocol(icmp.icmp), network, eth, port, packet)
-        elif network.dst in self.arp_table:
-            arp_info = self.arp_table[network.dst]
+        elif network.dst in self.arp_table[datapath.id]:
+            arp_info = self.arp_table[datapath.id][network.dst]
             self.logger.info(f"O {network.dst} ESTÁ NA TABELA")
-            for subnet,ip,port in self.arp_helper:
+            for subnet,ip,port in self.arp_helper[datapath.id]:
                 if ipaddress.IPv4Address(network.dst) in ipaddress.IPv4Network(subnet):
-                    self.send_ip(datapath, packet, arp_info[1], self.interfaces[ip], arp_info[0])
+                    self.send_ip(datapath, packet, arp_info[1], self.interfaces[datapath.id][ip], arp_info[0])
                     break
         else:
             self.find_arp(datapath, network, packet)
