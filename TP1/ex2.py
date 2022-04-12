@@ -6,7 +6,13 @@ from mininet.cli import CLI
 import threading
 import time
     
-    
+
+def adicionar_link(net):
+    time.sleep(10)
+    print("cenas\n")
+    net.configLinkStatus('s1','s4','down')
+
+
 setLogLevel( 'info' )
 
 c0 = RemoteController( 'c0', ip='127.0.0.1',port=6653, protocols="OpenFlow13")
@@ -20,6 +26,9 @@ class MultiSwitch( OVSSwitch ):
 
 topo = Topologia()
 net = Mininet( topo=topo, switch=MultiSwitch, build=False, waitConnected=True )
+
+threading.Thread(target=adicionar_link, args=(net,)).start()
+
 for c in [ c0, c1 ]:
     net.addController(c)
 
