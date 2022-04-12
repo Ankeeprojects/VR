@@ -98,3 +98,5 @@ class Topologia(Topo):
         self.addLink(s5, h16)
 
         self.addLink(s7, h17)
+
+        self.addLink(s7, s4)

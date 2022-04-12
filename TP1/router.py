@@ -17,9 +17,10 @@ import ipaddress
 import threading
 import time
 import json
+import datetime
 
 
-#inicializar ryu em port definida - sudo ryu-manager --ofp-tcp-listen-port 6654 router.py
+#inicializar ryu em port definida - ryu-manager --ofp-tcp-listen-port 6654 router.py
 
 class Router(app_manager.RyuApp):
     OFP_VERSIONS = [ofproto_v1_3.OFP_VERSION]
@@ -30,12 +31,14 @@ class Router(app_manager.RyuApp):
         self.mac_to_port = {}
         self.interfaces = dict()
         self.multicast_address = '224.0.0.10'
+        self.lock = threading.Lock()
 
         self.interfaces[4] = {
             "10.0.1.254" : "ff:ff:ff:00:00:01", 
             "10.0.2.254" : "ff:ff:ff:00:00:02",
             "10.0.3.254" : "ff:ff:ff:00:00:03",
-            "10.0.4.1" : "ff:ff:ff:00:00:04"
+            "10.0.4.1" : "ff:ff:ff:00:00:04",
+            "10.0.11.1" : "ff:ff:ff:00:00:0d"
         }
         
         self.interfaces[5] = {
@@ -49,15 +52,11 @@ class Router(app_manager.RyuApp):
             "10.0.7.254" : "ff:ff:ff:00:00:08", 
             "10.0.8.254" : "ff:ff:ff:00:00:09",
             "10.0.6.2" : "ff:ff:ff:00:00:0a",
-            "10.0.10.254" : "ff:ff:ff:00:00:0c"
+            "10.0.10.254" : "ff:ff:ff:00:00:0c",
+            "10.0.11.2" : "ff:ff:ff:00:00:0e"
         }
 
         self.buffer = dict()
-        """
-        self.buffer[4] = dict()
-        self.buffer[5] = dict()
-        self.buffer[7] = dict()
-"""
 
         self.arp_helper = dict()
 
@@ -65,7 +64,8 @@ class Router(app_manager.RyuApp):
             ['10.0.1.0/24', '10.0.1.254', 1],
             ['10.0.2.0/24', '10.0.2.254', 2],
             ['10.0.3.0/24', '10.0.3.254', 3],
-            ['10.0.4.0/24', '10.0.4.1', 4]
+            ['10.0.4.0/24', '10.0.4.1', 4],
+            ['10.0.11.0/24', '10.0.11.1', 5]
         ]
 
         self.arp_helper[5] = [
@@ -79,38 +79,68 @@ class Router(app_manager.RyuApp):
             ['10.0.6.0/24', '10.0.6.2', 1],
             ['10.0.7.0/24', '10.0.7.254', 2],
             ['10.0.8.0/24', '10.0.8.254', 3],
-            ['10.0.10.0/24', '10.0.10.254', 4]
+            ['10.0.10.0/24', '10.0.10.254', 4],
+            ['10.0.11.0/24', '10.0.11.2', 5]
         ]
 
         self.arp_table = dict()
 
-        """
-        self.arp_table[4] = dict()
-        self.arp_table[5] = dict()
-        self.arp_table[7] = dict()
-        """
         self.routers = dict()
 
         self.rotas = dict()
-        """
-        self.rotas[4] = dict()
-        self.rotas[5] = dict()
-        self.rotas[7] = dict()
-        """
         
+        self.vizinhos = dict()
+
         for id in [4,5,7]:
             self.arp_table[id] = dict()
             self.routers[id] = None
             self.buffer[id] = dict()
             self.rotas[id] = dict()
-            
+
         threading.Thread(target=self.rip_announcements, args=(4,)).start()
         threading.Thread(target=self.rip_announcements, args=(5,)).start()
         threading.Thread(target=self.rip_announcements, args=(7,)).start()
+
+        threading.Thread(target=self.timeouts, args=(4,)).start()
+        threading.Thread(target=self.timeouts, args=(5,)).start()
+        threading.Thread(target=self.timeouts, args=(7,)).start()
+
+    def timeouts(self, id):
+        while True:
+            time.sleep(0.5)
+
+            to_delete = set()
+            self.lock.acquire()
+            for vizinho, tempo in self.vizinhos.items():
+                diferenca = datetime.datetime.now() - tempo
+                if diferenca.total_seconds() > 1:
+                    self.logger.info(f"O VIZINHO {vizinho} MORREU")
     
+                    to_delete_routes = []
+                    for rota, info in self.rotas[id].items():
+                        if info[1] == vizinho:
+                            match =  self.routers[id].ofproto_parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP,
+                                                    ipv4_dst=rota,
+                                                    ip_proto=1)
+
+                            self.remove_flow(self.routers[id], 0, match, [])
+                            to_delete_routes.append(rota)
+
+                    if to_delete_routes:    
+                        for item in to_delete_routes:
+                            self.rotas[id].pop(item)
+                        to_delete.add(vizinho)
+
+            self.logger.info(f"VOU APAGAR {to_delete}")
+            for vizinho in to_delete:
+                self.vizinhos.pop(vizinho)
+
+
+            self.lock.release()
+
     def rip_announcements(self, id):
         while True:
-            time.sleep(3)
+            time.sleep(0.5)
             #self.logger.info(f"O meu DP é o {self.routers[id]}")
 
             if self.rotas[id]:
@@ -204,8 +234,6 @@ class Router(app_manager.RyuApp):
             self.send_ip(datapath, packet, in_port, arp_packet.dst_mac, arp_packet.src_mac)
 
     def send_ip(self, datapath, packet, in_port, src_mac, dst_mac):
-        
-        #OPENFLOW 1.3 datapath.ofproto_parser.OFPActionDecNwTtl(),
 
         self.logger.info(f"\n\n\nEstou a enviar um pacote {packet} pela {in_port}, para o {dst_mac}, a partir da {src_mac}\n\n\n")
         actions = [ 
@@ -274,39 +302,22 @@ class Router(app_manager.RyuApp):
             #self.logger.info(f"{type(datapath)}\n{type(pkt)}\n{type(eth)}\n{type(msg.in_port)}")
             self.process_arp(datapath, pkt, eth, msg.match['in_port'])
         elif network and network.proto == 1:
-                self.logger.info(f"O pacote é ICMP MAN")
-                self.logger.info(f"O pacote é {network}")
+            self.logger.info(f"O pacote é ICMP MAN")
+            self.logger.info(f"O pacote é {network}")
 
-                self.process_icmp(datapath, pkt, network, eth, msg.match['in_port'])
+            self.process_icmp(datapath, pkt, network, eth, msg.match['in_port'])
         elif network and network.dst==self.multicast_address:
+            self.lock.acquire()
+            self.vizinhos[network.src] = datetime.datetime.now()
+            self.lock.release()
+
             rotas = json.loads(pkt[-1])
             
-            self.logger.info(f"SOU O {datapath.id} E RECEBI ROTAS DO {network.src}: {rotas}")
-            
             self.add_rotas(rotas, datapath.id, network.src, eth.src, msg.match['in_port'])
-        #self.logger.info(network)
+
 
     def reply_icmp(self, datapath, icmp_pkt, network, eth, port, packet):
-        """
-        if network.src not in self.arp_table:
-            self.find_arp(datapath, network, packet)
-
-        e = ethernet.ethernet(src=eth.dst, dst=eth.src, ethertype=eth.ethertype)
         
-        i = ipv4.ipv4(src=network.dst, dst=network.src, proto=network.proto)
-
-        icmp_header = icmp.icmp(type_=icmp.ICMP_ECHO_REPLY,
-                                   code=icmp.ICMP_ECHO_REPLY_CODE,
-                                   csum=0,
-                                   data=icmp_pkt.data)
-        p = packet.Packet()
-        p.add_protocol(e)
-        p.add_protocol(i)
-        p.add_protocol(icmp_header)
-        p.serialize()
-        
-        self.logger.info(f"\n\nO pacote ICMP REPLY vai para o {type(network.src)} e o cabeçalho é o {icmp_header}\n\n")
-        """
         match = datapath.ofproto_parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP, 
                                                     ipv4_dst=network.dst, 
                                                     ipv4_src=network.src,
@@ -344,9 +355,7 @@ class Router(app_manager.RyuApp):
                     self.send_arp(datapath, network.dst, ip, port, self.interfaces[datapath.id][ip])
                     return port
 
-
     def process_icmp(self, datapath, packet:packet, network, eth, port) -> None:
-        #self.logger.info(network['dst'])
 
         self.logger.info(f"INFO DA TABELA: {self.arp_table[datapath.id]}")
 
@@ -384,26 +393,44 @@ class Router(app_manager.RyuApp):
  
  #self.add_flow(datapath, arp_packet.src_ip, arp_packet.dst_mac, arp_packet.src_mac, in_port)
     def remove_flow(self, datapath, table_id, match, instructions):
-        """Create OFP flow mod message to remove flows from table."""
+        """Create OFP flow mod message tosel remove flows from table."""
         ofproto = datapath.ofproto
         flow_mod = datapath.ofproto_parser.OFPFlowMod(datapath, 0, 0,table_id, ofproto.OFPFC_DELETE, 0, 0, 1,ofproto.OFPCML_NO_BUFFER,
                                                       ofproto.OFPP_ANY,
                                                       ofproto.OFPG_ANY, 0,
                                                       match, instructions)
-        return flow_mod
+        
+        datapath.send_msg(flow_mod)
     
     
     def add_rotas(self, rotas : dict, id : int, source : str, dst_mac,  port : int):
         for ip, dados in rotas.items():
             comp = self.rotas[id]
             if (ip in comp and dados[0]+1 < comp[ip][0]):
-                self.rotas[id][ip] = [dados[0]+1, source, port]    
+                self.rotas[id][ip] = [dados[0]+1, source, port]   
+                
+                self.logger.info(f"SOU O {datapath.id} E RECEBI UMA MELHOR DO {source}: {ip} com custo {dados[0]+1}") 
+                
+                src_mac = self.find_mac(id, ip)
+
+                match =  datapath.ofproto_parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP,
+                                                    ipv4_dst=ip,
+                                                    ip_proto=1)
+
+                actions = [ 
+                    datapath.ofproto_parser.OFPActionSetField(eth_dst=dst_mac),
+                    datapath.ofproto_parser.OFPActionSetField(eth_src=src_mac),
+                    datapath.ofproto_parser.OFPActionOutput(port, 0)]
+
+                self.remove_flow(self.routers[id], 0, match, [])
+                
+                self.add_flow(self.routers[id], 32769, match, actions)                
             elif ip not in comp:
                 datapath = self.routers[id]
                 match =  datapath.ofproto_parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP,
                                                     ipv4_dst=ip,
                                                     ip_proto=1)
-                self.remove_flow(self.routers[id], 0, match, [])
+                
                 self.rotas[id][ip] = [dados[0]+1, source, port]
 
                 src_mac = self.find_mac(id, ip)
@@ -421,7 +448,7 @@ class Router(app_manager.RyuApp):
             if ipaddress.IPv4Address(ip_dst) in ipaddress.IPv4Network(vals[0]):
                 return self.interfaces[id][vals[1]]
         
-        return 'ff:ff:ff:00:00:01'
+        return 'ff:ff:ff:00:00:aa'
 
     def add_flow(self, datapath, priority, match, actions):
         ofproto = datapath.ofproto
@@ -439,22 +466,3 @@ class Router(app_manager.RyuApp):
         mod = parser.OFPFlowMod(datapath=datapath, priority=priority,
                                 match=match, instructions=inst)
         datapath.send_msg(mod)
-
-        #codigo useful no futuro
-"""
-    @set_ev_cls(ofp_event.EventOFPPortStatus, MAIN_DISPATCHER)
-    def _port_status_handler(self, ev):
-        msg = ev.msg
-        reason = msg.reason
-        port_no = msg.desc.port_no
-
-        ofproto = msg.datapath.ofproto
-        if reason == ofproto.OFPPR_ADD:
-            self.logger.info("port added %s", port_no)
-        elif reason == ofproto.OFPPR_DELETE:
-            self.logger.info("port deleted %s", port_no)
-        elif reason == ofproto.OFPPR_MODIFY:
-            self.logger.info("port modified %s", port_no)
-        else:
-            self.logger.info("Illeagal port state %s %s", port_no, reason)
-"""
