@@ -200,45 +200,128 @@ class Router(app_manager.RyuApp):
             if entry[1] == ip:
                 return entry[2]
 
-    #Evento quando o router inicialmente pede informação sobre as suas propriedades
+    #Adiciona um flow para que o dispositivo envie mensagem ao controller quando não dá match noutro flow
     @set_ev_cls(ofp_event.EventOFPSwitchFeatures, CONFIG_DISPATCHER)
     def switch_features_handler(self, ev):
+        #dispositivo que envia mensagem
         datapath = ev.msg.datapath
+
+        #protocolo OpenFlow
         ofproto = datapath.ofproto
         parser = datapath.ofproto_parser
 
+        #Guarda as definições do dispositivo
         self.routers[datapath.id] = datapath
-        # install the table-miss flow entry.
+
         match = parser.OFPMatch()
         actions = [parser.OFPActionOutput(ofproto.OFPP_CONTROLLER,
                                           ofproto.OFPCML_NO_BUFFER)]
         self.add_flow(datapath, 0, match, actions)
+    
+    #Define o que acontece quando o controller recebe um pacote
+    @set_ev_cls(ofp_event.EventOFPPacketIn, MAIN_DISPATCHER)
+    def _packet_in_handler(self, ev):
+        msg = ev.msg
 
+        #Switch que enviou a mensagem
+        datapath = msg.datapath
+
+        #Constantes da versão do openflow que o switch fala
+        ofproto = datapath.ofproto
+
+        #Retira o pacote que foi enviado
+        pkt = packet.Packet(msg.data)
+
+        
+        #Informação de ethernet
+        eth = pkt.get_protocol(ethernet.ethernet)
+
+        #Ignorar pacotes LLDP
+        if eth.ethertype == ether_types.ETH_TYPE_LLDP:
+            return
+
+        #Informação IPv4
+        network = pkt.get_protocol(ipv4.ipv4)
+        
+        #Se for um pacote ARP
+        if eth.ethertype == ether_types.ETH_TYPE_ARP:
+            #self.logger.info(pkt.get_protocol(arp.arp))
+            
+            self.process_arp(datapath, pkt, eth, msg.match['in_port'])
+        
+        #Se for um pacote ICMP (campo protocol 1 no cabeçalho IPv4)
+        elif network and network.proto == 1:
+            
+            self.process_icmp(datapath, pkt, network, eth, msg.match['in_port'])
+        
+        #Se for um pacote destinado ao endereço de multicast definido
+        elif network and network.dst==self.multicast_address:
+
+            #atualiza último contacto de vizinho
+            self.lock.acquire()
+            self.vizinhos[network.src] = datetime.datetime.now()
+            self.lock.release()
+
+            #Extrai rotas do pacote
+            rotas = json.loads(pkt[-1])
+            
+            #Averigua se as rotas serão adicionadas
+            self.add_rotas(rotas, datapath.id, network.src, eth.src, msg.match['in_port'])
+
+    #Processa um pacote ARP recebido
     def process_arp(self, datapath, packet:packet, ether_frame:ethernet, in_port:int) -> None:
         arp_packet = packet.get_protocol(arp.arp)
 
+        #Se o pacote for um ARP REQUEST
         if arp_packet.opcode == 1: 
-            self.logger.info("RECEBI UM PACOTE ARP!!!!!")
-
             dst_ip = arp_packet.dst_ip
             mac = self.interfaces[datapath.id].get(dst_ip)
 
+            #Enviar um reply se o endereço MAC pertencer a este dispositivo, não fazer nada de outro modo (pacote é descartado)
             if mac:
                 self.arp_reply(datapath, ether_frame, mac, arp_packet, in_port)
-            else:
-                self.logger.info("PACOTE NÃO ERA PARA MIM")
-
+        
+        #Se for um ARP REPLY            
         elif arp_packet.opcode == 2:
             self.logger.info(f"Recebi este arp reply: {arp_packet}, e a info ethernet é {ether_frame}")
             
             self.process_arp_reply(datapath, arp_packet, in_port)
 
+    #Envia resposta a um ARP REQUEST
+    def arp_reply(self, datapath, ether_frame:ethernet, src_mac, arp_packet, in_port):    
+        dst_ip = arp_packet.src_ip
+        src_ip = arp_packet.dst_ip
+        
+        self.logger.info(f"ARP REQUEST {ether_frame.src} a vir de {in_port}. O IP de origem é {dst_ip} e o que lhe vou dar é o {src_ip}")
+        
+        e = ethernet.ethernet(ether_frame.src, src_mac, ether.ETH_TYPE_ARP)
+        
+        #cabeçalho ARP: hardware address, protocolo, length dos endereços fisicos, length endereços de protocolo, opcode 
+        a = arp.arp(1, 0x0800, 6, 4, 2, src_mac, src_ip, ether_frame.src, dst_ip)
+        p = packet.Packet()
+        p.add_protocol(e)
+        p.add_protocol(a)
+        p.serialize()
+
+        #Enviar um reply pela mesma porta por onde recebemos o request
+        actions = [datapath.ofproto_parser.OFPActionOutput(in_port, 0)
+
+        #Não há envio de um flowmod porque arp requests não acontecem com frequência suficiente que mereça diluir a flow table
+        out = datapath.ofproto_parser.OFPPacketOut(
+            datapath=datapath,
+            buffer_id=0xffffffff,
+            in_port=datapath.ofproto.OFPP_CONTROLLER,
+            actions=actions,
+            data=p.data)
+        datapath.send_msg(out)
+
     def process_arp_reply(self, datapath, arp_packet, in_port):
+        #É adicionada uma entrada à tabela ARP
         self.arp_table[datapath.id][arp_packet.src_ip] = (arp_packet.src_mac, in_port)
         
-        self.logger.info(f"Vou enviar um flowmod para quando receber um pacote para o {arp_packet.src_ip}, vai sai pela porta {in_port}, srcmac {arp_packet.src_mac}, dstmac {arp_packet.dst_mac}")
-        #Definir os parâmetros para dar match (porta de entrada, destino e source layer 2)
-
+        #self.logger.info(f"Vou enviar um flowmod para quando receber um pacote para o {arp_packet.src_ip}, vai sai pela porta {in_port}, srcmac {arp_packet.src_mac}, dstmac {arp_packet.dst_mac}")
+        
+        #Define os parâmetros para dar match - qualquer pacote IPv4 com destino ao emissor do pacote recebido
         match = datapath.ofproto_parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP, 
                                                     ipv4_dst=arp_packet.src_ip)
 
@@ -247,13 +330,14 @@ class Router(app_manager.RyuApp):
                 datapath.ofproto_parser.OFPActionSetField(eth_dst=arp_packet.src_mac),
                 datapath.ofproto_parser.OFPActionOutput(in_port, 0)]
 
-        #(custo, prox hop, interface)
+        #A rota para este destino é adicionada à tabela: (custo, prox hop, interface)
         self.rotas[datapath.id][arp_packet.src_ip] = (1, arp_packet.src_ip, in_port)
         
         self.logger.info(f"TABELA DE ENCAMINHAMENTO DO {datapath.id}: {self.rotas[datapath.id]}")
 
         self.add_flow(datapath, 32768, match, actions)
 
+        #Envia todos os pacotes em buffer para o destino
         for packet in self.buffer[datapath.id][arp_packet.src_ip]:
             self.send_ip(datapath, packet, in_port, arp_packet.dst_mac, arp_packet.src_mac)
 
@@ -273,73 +357,6 @@ class Router(app_manager.RyuApp):
             data=packet)
         datapath.send_msg(out)
     
-    
-    def arp_reply(self, datapath, ether_frame:ethernet, src_mac, arp_packet, in_port):    
-        dst_ip = arp_packet.src_ip
-        src_ip = arp_packet.dst_ip
-        
-        self.logger.info(f"ARP REQUEST {ether_frame.src} a vir de {in_port}. O IP do gajo é {dst_ip} e o que lhe vou dar é o {src_ip}")
-        self.logger.info(f"Vou enviar resposta com o mac {src_mac}, vai sair pela {in_port}")
-        
-
-        e = ethernet.ethernet(ether_frame.src, src_mac, ether.ETH_TYPE_ARP)
-        a = arp.arp(1, 0x0800, 6, 4, 2, src_mac, src_ip, ether_frame.src, dst_ip)
-        p = packet.Packet()
-        p.add_protocol(e)
-        p.add_protocol(a)
-        p.serialize()
-
-        actions = [datapath.ofproto_parser.OFPActionOutput(in_port, 0)]
-        out = datapath.ofproto_parser.OFPPacketOut(
-            datapath=datapath,
-            buffer_id=0xffffffff,
-            in_port=datapath.ofproto.OFPP_CONTROLLER,
-            actions=actions,
-            data=p.data)
-        datapath.send_msg(out)
-
-    @set_ev_cls(ofp_event.EventOFPPacketIn, MAIN_DISPATCHER)
-    def _packet_in_handler(self, ev):
-        msg = ev.msg
-
-        #Switch que enviou a mensagem
-        datapath = msg.datapath
-
-        #Constantes da versão do openflow que o switch fala
-        ofproto = datapath.ofproto
-
-        #Retira o pacote que foi enviado
-        pkt = packet.Packet(msg.data)
-
-        
-        #Informação de ethernet
-        eth = pkt.get_protocol(ethernet.ethernet)
-        network = pkt.get_protocol(ipv4.ipv4)
-        #self.logger.info(f"\n\n\n RECEBI O PACOTE {msg}\n\n")
-
-        if eth.ethertype == ether_types.ETH_TYPE_LLDP:
-            # Ignorar pacotes LLDP
-            return
-
-        if eth.ethertype == ether_types.ETH_TYPE_ARP:
-            self.logger.info(pkt.get_protocol(arp.arp))
-            #self.logger.info(f"{type(datapath)}\n{type(pkt)}\n{type(eth)}\n{type(msg.in_port)}")
-            self.process_arp(datapath, pkt, eth, msg.match['in_port'])
-        elif network and network.proto == 1:
-            self.logger.info(f"O pacote é ICMP MAN")
-            self.logger.info(f"O pacote é {network}")
-
-            self.process_icmp(datapath, pkt, network, eth, msg.match['in_port'])
-        elif network and network.dst==self.multicast_address:
-            self.lock.acquire()
-            self.vizinhos[network.src] = datetime.datetime.now()
-            self.lock.release()
-
-            rotas = json.loads(pkt[-1])
-            
-            self.add_rotas(rotas, datapath.id, network.src, eth.src, msg.match['in_port'])
-
-
     def reply_icmp(self, datapath, icmp_pkt, network, eth, port, packet):
         
         match = datapath.ofproto_parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP, 
