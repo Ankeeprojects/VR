@@ -28,11 +28,13 @@ class Router(app_manager.RyuApp):
     def __init__(self, *args, **kwargs):
         super(Router, self).__init__(*args, **kwargs)
         
-        self.mac_to_port = {}
         self.interfaces = dict()
+        
+        #Definição do endereço de multicast para difusão do protocolo de encaminhamento
         self.multicast_address = '224.0.0.10'
         self.lock = threading.Lock()
 
+        #Associação das interfaces de cada router da topologia, de acordo com o seu ID
         self.interfaces[4] = {
             "10.0.1.254" : "ff:ff:ff:00:00:01", 
             "10.0.2.254" : "ff:ff:ff:00:00:02",
@@ -56,8 +58,10 @@ class Router(app_manager.RyuApp):
             "10.0.11.2" : "ff:ff:ff:00:00:0e"
         }
 
+        #Buffer para pacotes que esperam resolução do protocolo ARP
         self.buffer = dict()
 
+        #Estrutura de apoio ao protocolo ARP, com a subrede a que cada interface pertence, assim como o seu endereço nesta
         self.arp_helper = dict()
 
         self.arp_helper[4] = [
@@ -83,12 +87,16 @@ class Router(app_manager.RyuApp):
             ['10.0.11.0/24', '10.0.11.2', 5]
         ]
 
+        #Tabela ARP, que associa endereços IP a endereços MAC
         self.arp_table = dict()
 
+        #Informação de datapath para cada um dos routers
         self.routers = dict()
 
+        #Rotas aprendidas para cada um dos routers
         self.rotas = dict()
         
+        #Vizinhos ativos de cada router
         self.vizinhos = dict()
 
         for id in [4,5,7]:
@@ -97,25 +105,33 @@ class Router(app_manager.RyuApp):
             self.buffer[id] = dict()
             self.rotas[id] = dict()
 
+        #Thread para controlar os anúncios do protocolo de encaminhamento
         threading.Thread(target=self.rip_announcements, args=(4,)).start()
         threading.Thread(target=self.rip_announcements, args=(5,)).start()
         threading.Thread(target=self.rip_announcements, args=(7,)).start()
 
+        #Thread para manter uma noção atualizada dos vizinhos que estão ativos
         threading.Thread(target=self.timeouts, args=(4,)).start()
         threading.Thread(target=self.timeouts, args=(5,)).start()
         threading.Thread(target=self.timeouts, args=(7,)).start()
 
     def timeouts(self, id):
+
+        #Verificar vizinhos a cada 0.5 segundos
         while True:
             time.sleep(0.5)
 
             to_delete = set()
             self.lock.acquire()
+
             for vizinho, tempo in self.vizinhos.items():
                 diferenca = datetime.datetime.now() - tempo
+                
+                #Averiguar se algum já não comunica há mais de 1 segundo
                 if diferenca.total_seconds() > 1:
                     self.logger.info(f"O VIZINHO {vizinho} MORREU")
-    
+
+                    #Apagar rotas provenientes deste vizinho e enviar um flowmod para remover
                     to_delete_routes = []
                     for rota, info in self.rotas[id].items():
                         if info[1] == vizinho:
@@ -138,19 +154,23 @@ class Router(app_manager.RyuApp):
 
             self.lock.release()
 
+    #Envio de anúncios RIP a cada 0.5 segundos
     def rip_announcements(self, id):
         while True:
             time.sleep(0.5)
-            #self.logger.info(f"O meu DP é o {self.routers[id]}")
-
+            
             if self.rotas[id]:
                 self.send_rip_update(self.routers[id], self.rotas[id])
 
+    
+    #Envia anúncio RIP por todas as suas interfaces
     def send_rip_update(self, datapath, rotas):
         for interface_ip, mac_add in self.interfaces[datapath.id].items():
             port = self.get_port(datapath.id, interface_ip)
             
             e = ethernet.ethernet(src=mac_add, dst='ff:ff:ff:ff:ff:ff', ethertype=2048)
+            
+            #Direciona o anúncio para o endereço de multicast
             i = ipv4.ipv4(version=4, proto=17, src=interface_ip, dst=self.multicast_address)
             u = udp.udp(src_port=36000, dst_port=36000)
             
@@ -158,6 +178,8 @@ class Router(app_manager.RyuApp):
             p.add_protocol(e)
             p.add_protocol(i)
             p.add_protocol(u)
+
+            #Inclui as rotas como payload
             p.add_protocol(json.dumps(rotas).encode('utf-8'))
             p.serialize()
 
@@ -172,11 +194,13 @@ class Router(app_manager.RyuApp):
         
             datapath.send_msg(out)
 
+    #Devolve a porta correspondente ao endereço IP do dispositivo ID
     def get_port(self, id, ip):
         for entry in self.arp_helper[id]:
             if entry[1] == ip:
                 return entry[2]
 
+    #Evento quando o router inicialmente pede informação sobre as suas propriedades
     @set_ev_cls(ofp_event.EventOFPSwitchFeatures, CONFIG_DISPATCHER)
     def switch_features_handler(self, ev):
         datapath = ev.msg.datapath
