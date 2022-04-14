@@ -147,7 +147,8 @@ class Router(app_manager.RyuApp):
                             self.rotas[id].pop(item)
                         to_delete.add(vizinho)
 
-            self.logger.info(f"VOU APAGAR {to_delete}")
+            if to_delete:
+                self.logger.info(f"VOU APAGAR {to_delete}")
             for vizinho in to_delete:
                 self.vizinhos.pop(vizinho)
 
@@ -304,15 +305,15 @@ class Router(app_manager.RyuApp):
         p.serialize()
 
         #Enviar um reply pela mesma porta por onde recebemos o request
-        actions = [datapath.ofproto_parser.OFPActionOutput(in_port, 0)
+        actions = [datapath.ofproto_parser.OFPActionOutput(in_port, 0)]
 
         #Não há envio de um flowmod porque arp requests não acontecem com frequência suficiente que mereça diluir a flow table
         out = datapath.ofproto_parser.OFPPacketOut(
-            datapath=datapath,
-            buffer_id=0xffffffff,
-            in_port=datapath.ofproto.OFPP_CONTROLLER,
-            actions=actions,
-            data=p.data)
+                datapath=datapath,
+                buffer_id=0xffffffff,
+                in_port=datapath.ofproto.OFPP_CONTROLLER,
+                actions=actions,
+                data=p.data)
         datapath.send_msg(out)
 
     def process_arp_reply(self, datapath, arp_packet, in_port):
