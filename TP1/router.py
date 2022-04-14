@@ -342,6 +342,8 @@ class Router(app_manager.RyuApp):
         for packet in self.buffer[datapath.id][arp_packet.src_ip]:
             self.send_ip(datapath, packet, in_port, arp_packet.dst_mac, arp_packet.src_mac)
 
+
+    #Envia pacote pela porta in_port do datapath, alterando info ethernet para src_mac e dst_mac
     def send_ip(self, datapath, packet, in_port, src_mac, dst_mac):
 
         self.logger.info(f"\n\n\nEstou a enviar um pacote {packet} pela {in_port}, para o {dst_mac}, a partir da {src_mac}\n\n\n")
@@ -358,12 +360,40 @@ class Router(app_manager.RyuApp):
             data=packet)
         datapath.send_msg(out)
     
+
+    #Processar pacote ICMP recebido
+    def process_icmp(self, datapath, packet:packet, network, eth, port) -> None:
+
+        self.logger.info(f"INFO DA TABELA: {self.arp_table[datapath.id]}")
+
+        #Avalia se o destino do ping é a interface do router
+        if network.dst in self.interfaces[datapath.id]:
+            self.logger.info(f"O PING É PARA O ROUTER {datapath.id}, NA INTERFACE {network.dst} MAC {self.interfaces[datapath.id][network.dst]}")
+            self.reply_icmp(datapath, packet.get_protocol(icmp.icmp), network, eth, port, packet)
+        
+        #Caso não seja, vê se o destino está na arp_table
+        elif network.dst in self.arp_table[datapath.id]:
+            arp_info = self.arp_table[datapath.id][network.dst]
+
+            for subnet,ip,port in self.arp_helper[datapath.id]:
+                #averiguar se o endereço está nesta subrede
+                if ipaddress.IPv4Address(network.dst) in ipaddress.IPv4Network(subnet):
+                    self.send_ip(datapath, packet, arp_info[1], self.interfaces[datapath.id][ip], arp_info[0])
+                    break
+        #Caso em que o endereço não é do router, e não está na tabela ARP
+        else:
+            self.find_arp(datapath, network, packet)
+
+    #Preparar resposta ICMP e adicionar flow para comunicações entre estes intervenientes       
     def reply_icmp(self, datapath, icmp_pkt, network, eth, port, packet):
         
+        #Match para ethernet, entre os dois endereços IPv4, e protocolo ICMP (ip_proto=1), Request (ICMP type 8)
         match = datapath.ofproto_parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP, 
                                                     ipv4_dst=network.dst, 
                                                     ipv4_src=network.src,
                                                     ip_proto=1, icmpv4_type=8)
+        
+        #Endereços IPv4 e MAC são invertidos para responder, e o tipo e código de ICMP alterados para 0 (Reply)
         actions = [ 
                 datapath.ofproto_parser.OFPActionSetField(ipv4_dst=network.src),
                 datapath.ofproto_parser.OFPActionSetField(ipv4_src=network.dst),
@@ -373,9 +403,6 @@ class Router(app_manager.RyuApp):
                 datapath.ofproto_parser.OFPActionSetField(icmpv4_code=0),
                 datapath.ofproto_parser.OFPActionOutput(datapath.ofproto.OFPP_IN_PORT)]
 
-        actions2 = [datapath.ofproto_parser.OFPActionSetField(ipv4_dst=network.src),
-                datapath.ofproto_parser.OFPActionSetField(ipv4_src=network.dst),
-                datapath.ofproto_parser.OFPActionOutput(1)]
         self.add_flow(datapath, 32768, match, actions)
         
         out = datapath.ofproto_parser.OFPPacketOut(
@@ -386,6 +413,7 @@ class Router(app_manager.RyuApp):
             data=packet)
         datapath.send_msg(out)
 
+    #
     def find_arp(self, datapath, network, packet) -> int:
         for subnet,ip,port in self.arp_helper[datapath.id]:
                 if ipaddress.IPv4Address(network.dst) in ipaddress.IPv4Network(subnet):
@@ -397,45 +425,35 @@ class Router(app_manager.RyuApp):
                     self.send_arp(datapath, network.dst, ip, port, self.interfaces[datapath.id][ip])
                     return port
 
-    def process_icmp(self, datapath, packet:packet, network, eth, port) -> None:
-
-        self.logger.info(f"INFO DA TABELA: {self.arp_table[datapath.id]}")
-
-        if network.dst in self.interfaces[datapath.id]:
-            self.logger.info(f"O PING É PARA MIM, NA INTERFACE {network.dst} mac {self.interfaces[datapath.id][network.dst]}")
-            self.reply_icmp(datapath, packet.get_protocol(icmp.icmp), network, eth, port, packet)
-        elif network.dst in self.arp_table[datapath.id]:
-            arp_info = self.arp_table[datapath.id][network.dst]
-            self.logger.info(f"O {network.dst} ESTÁ NA TABELA")
-            for subnet,ip,port in self.arp_helper[datapath.id]:
-                if ipaddress.IPv4Address(network.dst) in ipaddress.IPv4Network(subnet):
-                    self.send_ip(datapath, packet, arp_info[1], self.interfaces[datapath.id][ip], arp_info[0])
-                    break
-        else:
-            self.find_arp(datapath, network, packet)
-            
     
+    #Enviar um pacote ARP REQUEST para pedir o dst_ip
     def send_arp(self, datapath, dst_ip, src_ip, port, src_mac):
         e = ethernet.ethernet(src=src_mac, dst='ff:ff:ff:ff:ff:ff', ethertype=ether.ETH_TYPE_ARP)
+
+        #Indicar que o protocolo é IPv4 (0x0800), o hardware length (MAC address) são 6 bytes, protocol length são 4 bytes (IPv4)
         a = arp.arp(hwtype=1, proto=0x0800, hlen=6, plen=4, opcode=1, src_mac=src_mac, src_ip=src_ip, dst_mac='00:00:00:00:00:00', dst_ip=dst_ip)
+        
         p = packet.Packet()
         p.add_protocol(e)
         p.add_protocol(a)
         p.serialize()
 
-        self.logger.info(f"O pacote ARP vai para do {src_mac} para  ")
+        self.logger.info(f"A enviar pacote ARP para {dst_ip")
+        
         actions = [datapath.ofproto_parser.OFPActionOutput(port, 0)]
+        
         out = datapath.ofproto_parser.OFPPacketOut(
             datapath=datapath,
             buffer_id=0xffffffff,
             in_port=datapath.ofproto.OFPP_CONTROLLER,
             actions=actions,
             data=p.data)
+        
         datapath.send_msg(out)
  
- #self.add_flow(datapath, arp_packet.src_ip, arp_packet.dst_mac, arp_packet.src_mac, in_port)
+    #Remover flow do dispositivo
     def remove_flow(self, datapath, table_id, match, instructions):
-        """Create OFP flow mod message tosel remove flows from table."""
+        
         ofproto = datapath.ofproto
         flow_mod = datapath.ofproto_parser.OFPFlowMod(datapath, 0, 0,table_id, ofproto.OFPFC_DELETE, 0, 0, 1,ofproto.OFPCML_NO_BUFFER,
                                                       ofproto.OFPP_ANY,
@@ -444,14 +462,16 @@ class Router(app_manager.RyuApp):
         
         datapath.send_msg(flow_mod)
     
-    
+    #Averigua se o dicionário de rotas contém alguma melhor do que as que já existem/alguma rota nova
     def add_rotas(self, rotas : dict, id : int, source : str, dst_mac,  port : int):
         for ip, dados in rotas.items():
             comp = self.rotas[id]
+
+            #Se já houver uma rota e o custo for superior 
             if (ip in comp and dados[0]+1 < comp[ip][0]):
                 self.rotas[id][ip] = [dados[0]+1, source, port]   
                 
-                self.logger.info(f"SOU O {datapath.id} E RECEBI UMA MELHOR DO {source}: {ip} com custo {dados[0]+1}") 
+                self.logger.info(f"SOU O {datapath.id} E RECEBI UMA ROTA MELHOR DO {source}: {ip} com custo {dados[0]+1}") 
                 
                 src_mac = self.find_mac(id, ip)
 
@@ -464,6 +484,7 @@ class Router(app_manager.RyuApp):
                     datapath.ofproto_parser.OFPActionSetField(eth_src=src_mac),
                     datapath.ofproto_parser.OFPActionOutput(port, 0)]
 
+                #removemos o flow anterior para que o melhor caminho seja o escolhido
                 self.remove_flow(self.routers[id], 0, match, [])
                 
                 self.add_flow(self.routers[id], 32769, match, actions)                
@@ -477,7 +498,6 @@ class Router(app_manager.RyuApp):
 
                 src_mac = self.find_mac(id, ip)
 
-                self.logger.info(f"O ENDEREÇO MAC É O {src_mac} para mandar para o {dst_mac} de ip {ip}")
                 actions = [ 
                     datapath.ofproto_parser.OFPActionSetField(eth_dst=dst_mac),
                     datapath.ofproto_parser.OFPActionSetField(eth_src=src_mac),
@@ -485,6 +505,7 @@ class Router(app_manager.RyuApp):
 
                 self.add_flow(self.routers[id], 32769, match, actions)
 
+    #Encontra o endereço MAC da interface do dispositivo nessa subrede, devolve um endereço genérico se esta não existir
     def find_mac(self, id, ip_dst):
         for vals in self.arp_helper[id]:
             if ipaddress.IPv4Address(ip_dst) in ipaddress.IPv4Network(vals[0]):
@@ -492,13 +513,13 @@ class Router(app_manager.RyuApp):
         
         return 'ff:ff:ff:00:00:aa'
 
+    #Adiciona um flow ao dispositivo
     def add_flow(self, datapath, priority, match, actions):
         ofproto = datapath.ofproto
         parser = datapath.ofproto_parser
 
-        self.logger.info(f"\nSOU O {datapath.id} E ESTOU A INSTALAR UM FLOW!!!!! {actions} {match}\n")
+        self.logger.info(f"\nSOU O ROUTER {datapath.id} E ESTOU A INSTALAR UM FLOW!!!!! {actions} {match}\n")
 
-        # construct flow_mod message and send it.
         if actions:
             inst = [parser.OFPInstructionActions(ofproto.OFPIT_APPLY_ACTIONS,
                                              actions)]
