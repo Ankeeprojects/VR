@@ -42,7 +42,6 @@ class Topologia(Topo):
         
         h17 = self.addHost('h17', ip="10.0.10.17/24", defaultRoute = "via 10.0.10.254")
         
-        #self.h10 = self.addHost('h10', ip="10.0.1.69/24", defaultRoute = "via 10.0.1.254")
 
         # Adding switches
         s1 = self.addSwitch('s1', dpid="0000000000000001", protocols="OpenFlow13")

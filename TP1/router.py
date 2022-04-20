@@ -438,7 +438,7 @@ class Router(app_manager.RyuApp):
         p.add_protocol(a)
         p.serialize()
 
-        self.logger.info(f"A enviar pacote ARP para {dst_ip")
+        self.logger.info(f"A enviar pacote ARP para {dst_ip}")
         
         actions = [datapath.ofproto_parser.OFPActionOutput(port, 0)]
         
