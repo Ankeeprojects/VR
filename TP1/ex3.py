@@ -8,7 +8,7 @@ import time
     
 
 def alterar_link(net):
-    time.sleep(25)
+    time.sleep(65)
     net.configLinkStatus('s4','s7','down')
 
 

@@ -99,12 +99,15 @@ class Router(app_manager.RyuApp):
         #Vizinhos ativos de cada router
         self.vizinhos = dict()
 
+        #Informação se a tabela foi alterada desde o ultimo update
+        self.changes = dict()
+
         for id in [4,5,7]:
             self.arp_table[id] = dict()
             self.routers[id] = None
             self.buffer[id] = dict()
             self.rotas[id] = dict()
-
+            self.changes[id] = 0
         #Thread para controlar os anúncios do protocolo de encaminhamento
         threading.Thread(target=self.rip_announcements, args=(4,)).start()
         threading.Thread(target=self.rip_announcements, args=(5,)).start()
@@ -160,40 +163,44 @@ class Router(app_manager.RyuApp):
         while True:
             time.sleep(0.5)
             
-            if self.rotas[id]:
+            if self.changes[id] == 1:
                 self.send_rip_update(self.routers[id], self.rotas[id])
-
+            else:
+                self.send_rip_update(self.routers[id], None)
     
     #Envia anúncio RIP por todas as suas interfaces
     def send_rip_update(self, datapath, rotas):
-        for interface_ip, mac_add in self.interfaces[datapath.id].items():
-            port = self.get_port(datapath.id, interface_ip)
-            
-            e = ethernet.ethernet(src=mac_add, dst='ff:ff:ff:ff:ff:ff', ethertype=2048)
-            
-            #Direciona o anúncio para o endereço de multicast
-            i = ipv4.ipv4(version=4, proto=17, src=interface_ip, dst=self.multicast_address)
-            u = udp.udp(src_port=36000, dst_port=36000)
-            
-            p = packet.Packet()
-            p.add_protocol(e)
-            p.add_protocol(i)
-            p.add_protocol(u)
+        if datapath is not None:
+            for interface_ip, mac_add in self.interfaces[datapath.id].items():
+                port = self.get_port(datapath.id, interface_ip)
+                
+                e = ethernet.ethernet(src=mac_add, dst='ff:ff:ff:ff:ff:ff', ethertype=2048)
+                
+                #Direciona o anúncio para o endereço de multicast
+                i = ipv4.ipv4(version=4, proto=17, src=interface_ip, dst=self.multicast_address)
+                u = udp.udp(src_port=36000, dst_port=36000)
+                
+                p = packet.Packet()
+                p.add_protocol(e)
+                p.add_protocol(i)
+                p.add_protocol(u)
 
-            #Inclui as rotas como payload
-            p.add_protocol(json.dumps(rotas).encode('utf-8'))
-            p.serialize()
+                if rotas is not None:
+                    #Inclui as rotas como payload
+                    p.add_protocol(json.dumps(rotas).encode('utf-8'))
+                
+                p.serialize()
 
-            actions = [datapath.ofproto_parser.OFPActionOutput(port, 0)]
+                actions = [datapath.ofproto_parser.OFPActionOutput(port, 0)]
 
-            out = datapath.ofproto_parser.OFPPacketOut(
-                datapath=datapath,
-                buffer_id=0xffffffff,
-                in_port=datapath.ofproto.OFPP_CONTROLLER,
-                actions=actions,
-                data=p.data)
-        
-            datapath.send_msg(out)
+                out = datapath.ofproto_parser.OFPPacketOut(
+                    datapath=datapath,
+                    buffer_id=0xffffffff,
+                    in_port=datapath.ofproto.OFPP_CONTROLLER,
+                    actions=actions,
+                    data=p.data)
+            
+                datapath.send_msg(out)
 
     #Devolve a porta correspondente ao endereço IP do dispositivo ID
     def get_port(self, id, ip):
@@ -246,7 +253,6 @@ class Router(app_manager.RyuApp):
         
         #Se for um pacote ARP
         if eth.ethertype == ether_types.ETH_TYPE_ARP:
-            #self.logger.info(pkt.get_protocol(arp.arp))
             
             self.process_arp(datapath, pkt, eth, msg.match['in_port'])
         
@@ -261,11 +267,13 @@ class Router(app_manager.RyuApp):
             #atualiza último contacto de vizinho
             self.lock.acquire()
             self.vizinhos[network.src] = datetime.datetime.now()
-            self.lock.release()
-
-            #Extrai rotas do pacote
-            rotas = json.loads(pkt[-1])
+            self.lock.release()     
             
+            if pkt.get_protocol(udp.udp).total_length > 8:
+                #Extrai rotas do pacote
+                rotas = json.loads(pkt[-1])
+            else:
+                rotas = None
             #Averigua se as rotas serão adicionadas
             self.add_rotas(rotas, datapath.id, network.src, eth.src, msg.match['in_port'])
 
@@ -320,8 +328,6 @@ class Router(app_manager.RyuApp):
         #É adicionada uma entrada à tabela ARP
         self.arp_table[datapath.id][arp_packet.src_ip] = (arp_packet.src_mac, in_port)
         
-        #self.logger.info(f"Vou enviar um flowmod para quando receber um pacote para o {arp_packet.src_ip}, vai sai pela porta {in_port}, srcmac {arp_packet.src_mac}, dstmac {arp_packet.dst_mac}")
-        
         #Define os parâmetros para dar match - qualquer pacote IPv4 com destino ao emissor do pacote recebido
         match = datapath.ofproto_parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP, 
                                                     ipv4_dst=arp_packet.src_ip)
@@ -338,6 +344,7 @@ class Router(app_manager.RyuApp):
 
         self.add_flow(datapath, 32768, match, actions)
 
+        self.changes[datapath.id] = 1
         #Envia todos os pacotes em buffer para o destino
         for packet in self.buffer[datapath.id][arp_packet.src_ip]:
             self.send_ip(datapath, packet, in_port, arp_packet.dst_mac, arp_packet.src_mac)
@@ -464,46 +471,51 @@ class Router(app_manager.RyuApp):
     
     #Averigua se o dicionário de rotas contém alguma melhor do que as que já existem/alguma rota nova
     def add_rotas(self, rotas : dict, id : int, source : str, dst_mac,  port : int):
-        for ip, dados in rotas.items():
-            comp = self.rotas[id]
+        if rotas is not None:
+            for ip, dados in rotas.items():
+                comp = self.rotas[id]
 
-            #Se já houver uma rota e o custo for superior 
-            if (ip in comp and dados[0]+1 < comp[ip][0]):
-                self.rotas[id][ip] = [dados[0]+1, source, port]   
-                
-                self.logger.info(f"SOU O {datapath.id} E RECEBI UMA ROTA MELHOR DO {source}: {ip} com custo {dados[0]+1}") 
-                
-                src_mac = self.find_mac(id, ip)
+                #Se já houver uma rota e o custo for superior 
+                if (ip in comp and dados[0]+1 < comp[ip][0]):
+                    self.rotas[id][ip] = [dados[0]+1, source, port]   
+                    
+                    self.logger.info(f"SOU O {datapath.id} E RECEBI UMA ROTA MELHOR DO {source}: {ip} com custo {dados[0]+1}") 
+                    
+                    src_mac = self.find_mac(id, ip)
 
-                match =  datapath.ofproto_parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP,
-                                                    ipv4_dst=ip,
-                                                    ip_proto=1)
+                    match =  datapath.ofproto_parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP,
+                                                        ipv4_dst=ip,
+                                                        ip_proto=1)
 
-                actions = [ 
-                    datapath.ofproto_parser.OFPActionSetField(eth_dst=dst_mac),
-                    datapath.ofproto_parser.OFPActionSetField(eth_src=src_mac),
-                    datapath.ofproto_parser.OFPActionOutput(port, 0)]
+                    actions = [ 
+                        datapath.ofproto_parser.OFPActionSetField(eth_dst=dst_mac),
+                        datapath.ofproto_parser.OFPActionSetField(eth_src=src_mac),
+                        datapath.ofproto_parser.OFPActionOutput(port, 0)]
 
-                #removemos o flow anterior para que o melhor caminho seja o escolhido
-                self.remove_flow(self.routers[id], 0, match, [])
-                
-                self.add_flow(self.routers[id], 32769, match, actions)                
-            elif ip not in comp:
-                datapath = self.routers[id]
-                match =  datapath.ofproto_parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP,
-                                                    ipv4_dst=ip,
-                                                    ip_proto=1)
-                
-                self.rotas[id][ip] = [dados[0]+1, source, port]
+                    #removemos o flow anterior para que o melhor caminho seja o escolhido
+                    self.remove_flow(self.routers[id], 0, match, [])
+                    
+                    self.add_flow(self.routers[id], 32769, match, actions) 
 
-                src_mac = self.find_mac(id, ip)
+                    self.changes[id] = 1               
+                elif ip not in comp:
+                    datapath = self.routers[id]
+                    match =  datapath.ofproto_parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP,
+                                                        ipv4_dst=ip,
+                                                        ip_proto=1)
+                    
+                    self.rotas[id][ip] = [dados[0]+1, source, port]
 
-                actions = [ 
-                    datapath.ofproto_parser.OFPActionSetField(eth_dst=dst_mac),
-                    datapath.ofproto_parser.OFPActionSetField(eth_src=src_mac),
-                    datapath.ofproto_parser.OFPActionOutput(port, 0)]
+                    src_mac = self.find_mac(id, ip)
 
-                self.add_flow(self.routers[id], 32769, match, actions)
+                    actions = [ 
+                        datapath.ofproto_parser.OFPActionSetField(eth_dst=dst_mac),
+                        datapath.ofproto_parser.OFPActionSetField(eth_src=src_mac),
+                        datapath.ofproto_parser.OFPActionOutput(port, 0)]
+
+                    self.add_flow(self.routers[id], 32769, match, actions)
+
+                    self.changes[id] = 1
 
     #Encontra o endereço MAC da interface do dispositivo nessa subrede, devolve um endereço genérico se esta não existir
     def find_mac(self, id, ip_dst):
