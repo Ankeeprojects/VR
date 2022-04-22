@@ -101,8 +101,11 @@ class Router(app_manager.RyuApp):
         #Vizinhos ativos de cada router
         self.vizinhos = dict()
 
-        #Informação se a tabela foi alterada desde o ultimo update
+        #Informação se a tabela foi alterada desde o último update
         self.changes = dict()
+        
+        #Identificadores para os grupos de cada dispositivo
+        self.groupID = dict()
 
         for id in [4,5,7]:
             self.arp_table[id] = dict()
@@ -110,6 +113,8 @@ class Router(app_manager.RyuApp):
             self.buffer[id] = dict()
             self.rotas[id] = dict()
             self.changes[id] = 0
+            self.groupID[id] = 1
+        
         #Thread para controlar os anúncios do protocolo de encaminhamento
         threading.Thread(target=self.rip_announcements, args=(4,)).start()
         threading.Thread(target=self.rip_announcements, args=(5,)).start()
@@ -276,6 +281,7 @@ class Router(app_manager.RyuApp):
                 rotas = json.loads(pkt[-1])
             else:
                 rotas = None
+
             #Averigua se as rotas serão adicionadas
             self.add_rotas(rotas, datapath.id, network.src, eth.src, msg.match['in_port'])
 
@@ -422,7 +428,7 @@ class Router(app_manager.RyuApp):
             data=packet)
         datapath.send_msg(out)
 
-    #
+    
     def find_arp(self, datapath, network, packet) -> int:
         for subnet,ip,port in self.arp_helper[datapath.id]:
                 if ipaddress.IPv4Address(network.dst) in ipaddress.IPv4Network(subnet):
@@ -506,14 +512,30 @@ class Router(app_manager.RyuApp):
                                                         ipv4_dst=ip,
                                                         ip_proto=1)
                     
-                    self.rotas[id][ip] = [dados[0]+1, source, port]
+                    self.rotas[id][ip] = [dados[0]+1, source, port, self.groupID[id]]
 
                     src_mac = self.find_mac(id, ip)
 
-                    actions = [ 
+                    bucket_actions = [ 
                         datapath.ofproto_parser.OFPActionSetField(eth_dst=dst_mac),
                         datapath.ofproto_parser.OFPActionSetField(eth_src=src_mac),
-                        datapath.ofproto_parser.OFPActionOutput(port, 0)]
+                        datapath.ofproto_parser.OFPActionOutput(port, 0)
+                        ]
+
+                    actions = [datapath.ofproto_parser.OFPActionGroup(self.groupID[id])]
+
+                    bucket = [datapath.ofproto_parser.OFPBucket(
+                                weight=1,
+                                watch_port=port,
+                                watch_group=0,
+                                actions=bucket_actions
+                                )]
+                    
+                    group = datapath.ofproto_parser.OFPGroupMod(datapath, 0, 1, self.groupID[id], bucket)
+
+                    datapath.send_msg(group)
+
+                    self.groupID[id]+=1
 
                     self.add_flow(self.routers[id], 32769, match, actions)
 
