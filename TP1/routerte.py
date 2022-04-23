@@ -504,9 +504,30 @@ class Router(app_manager.RyuApp):
             for ip, dados in rotas.items():
                 comp = self.rotas[id]
 
-                #Se já houver uma rota e o custo for superior 
+                #Se já houver uma rota e o custo for igual
                 if ip in comp and dados[0]+1 == comp[ip][0]:
-                    pass
+                    datapath = self.routers[id]
+                    
+                    src_mac = self.find_mac(id, ip)
+                    
+                    bucket_actions = [ 
+                        datapath.ofproto_parser.OFPActionSetField(eth_dst=dst_mac),
+                        datapath.ofproto_parser.OFPActionSetField(eth_src=src_mac),
+                        datapath.ofproto_parser.OFPActionOutput(port, 0)
+                        ]
+
+                    self.logger.info(f"Sou o router {id} e vou meter um flow para o grupo {comp[ip][3]} para o {ip}")
+                    bucket = [datapath.ofproto_parser.OFPBucket(
+                                weight=1,
+                                watch_port=0,
+                                watch_group=0,
+                                actions=bucket_actions
+                                )]
+                    
+                    group = datapath.ofproto_parser.OFPGroupMod(datapath, 1, 1, comp[ip][3], bucket)
+
+                    datapath.send_msg(group)
+
                 
                 elif (ip in comp and dados[0]+1 < comp[ip][0]):
                     self.rotas[id][ip] = [dados[0]+1, source, port]   
@@ -525,7 +546,7 @@ class Router(app_manager.RyuApp):
 
                     #removemos o flow anterior para que o melhor caminho seja o escolhido
                     self.remove_flow(self.routers[id], 0, match, [])
-                    
+                                        
                     self.add_flow(self.routers[id], 32769, match, actions) 
 
                     self.changes[id] = 1               
@@ -549,7 +570,7 @@ class Router(app_manager.RyuApp):
 
                     bucket = [datapath.ofproto_parser.OFPBucket(
                                 weight=1,
-                                watch_port=port,
+                                watch_port=0,
                                 watch_group=0,
                                 actions=bucket_actions
                                 )]
