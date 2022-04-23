@@ -484,7 +484,10 @@ class Router(app_manager.RyuApp):
                 comp = self.rotas[id]
 
                 #Se já houver uma rota e o custo for superior 
-                if (ip in comp and dados[0]+1 < comp[ip][0]):
+                if ip in comp and dados[0]+1 == comp[ip][0]:
+
+                
+                elif (ip in comp and dados[0]+1 < comp[ip][0]):
                     self.rotas[id][ip] = [dados[0]+1, source, port]   
                     
                     self.logger.info(f"SOU O {datapath.id} E RECEBI UMA ROTA MELHOR DO {source}: {ip} com custo {dados[0]+1}") 
@@ -492,8 +495,7 @@ class Router(app_manager.RyuApp):
                     src_mac = self.find_mac(id, ip)
 
                     match =  datapath.ofproto_parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP,
-                                                        ipv4_dst=ip,
-                                                        ip_proto=1)
+                                                        ipv4_dst=ip)
 
                     actions = [ 
                         datapath.ofproto_parser.OFPActionSetField(eth_dst=dst_mac),
@@ -508,10 +510,10 @@ class Router(app_manager.RyuApp):
                     self.changes[id] = 1               
                 elif ip not in comp:
                     datapath = self.routers[id]
-                    match =  datapath.ofproto_parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP,
-                                                        ipv4_dst=ip,
-                                                        ip_proto=1)
                     
+                    match =  datapath.ofproto_parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP,
+                                                        ipv4_dst=ip)
+
                     self.rotas[id][ip] = [dados[0]+1, source, port, self.groupID[id]]
 
                     src_mac = self.find_mac(id, ip)
