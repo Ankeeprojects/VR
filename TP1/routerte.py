@@ -49,7 +49,8 @@ class Router(app_manager.RyuApp):
             "10.0.4.2" : "ff:ff:ff:00:00:05", 
             "10.0.5.254" : "ff:ff:ff:00:00:06",
             "10.0.6.1" : "ff:ff:ff:00:00:07",
-            "10.0.9.254" : "ff:ff:ff:00:00:0b"
+            "10.0.9.254" : "ff:ff:ff:00:00:0b",
+            "10.0.12.5" : "ff:ff:ff:00:00:0f"
         }
 
         self.interfaces[7] = {
@@ -57,7 +58,15 @@ class Router(app_manager.RyuApp):
             "10.0.8.254" : "ff:ff:ff:00:00:09",
             "10.0.6.2" : "ff:ff:ff:00:00:0a",
             "10.0.10.254" : "ff:ff:ff:00:00:0c",
-            "10.0.11.2" : "ff:ff:ff:00:00:0e"
+            "10.0.11.2" : "ff:ff:ff:00:00:0e",
+            "10.0.13.7" : "ff:ff:ff:00:00:10"
+        }
+
+        self.interfaces[9] = {
+            "10.0.12.9" : "ff:ff:ff:00:00:11",
+            "10.0.13.9" : "ff:ff:ff:00:00:12",
+            "10.0.14.254" : "ff:ff:ff:00:00:13",
+            "10.0.15.254" : "ff:ff:ff:00:00:14"
         }
 
         #Buffer para pacotes que esperam resolução do protocolo ARP
@@ -78,7 +87,8 @@ class Router(app_manager.RyuApp):
             ['10.0.4.0/24', '10.0.4.2', 1],
             ['10.0.5.0/24', '10.0.5.254', 2],
             ['10.0.6.0/24', '10.0.6.1', 3],
-            ['10.0.9.0/24', '10.0.9.254', 4]
+            ['10.0.9.0/24', '10.0.9.254', 4],
+            ['10.0.12.0/24', '10.0.12.5', 5]
         ]
 
         self.arp_helper[7] = [
@@ -86,7 +96,15 @@ class Router(app_manager.RyuApp):
             ['10.0.7.0/24', '10.0.7.254', 2],
             ['10.0.8.0/24', '10.0.8.254', 3],
             ['10.0.10.0/24', '10.0.10.254', 4],
-            ['10.0.11.0/24', '10.0.11.2', 5]
+            ['10.0.11.0/24', '10.0.11.2', 5],
+            ['10.0.13.0/24', '10.0.13.7', 6]
+        ]
+
+        self.arp_helper[9] = [
+            ['10.0.12.0/24', '10.0.12.9', 1],
+            ['10.0.13.0/24', '10.0.13.9', 2],
+            ['10.0.14.0/24', '10.0.14.254', 3],
+            ['10.0.15.0/24', '10.0.15.254', 4]
         ]
 
         #Tabela ARP, que associa endereços IP a endereços MAC
@@ -107,7 +125,7 @@ class Router(app_manager.RyuApp):
         #Identificadores para os grupos de cada dispositivo
         self.groupID = dict()
 
-        for id in [4,5,7]:
+        for id in [4,5,7,9]:
             self.arp_table[id] = dict()
             self.routers[id] = None
             self.buffer[id] = dict()
@@ -119,11 +137,14 @@ class Router(app_manager.RyuApp):
         threading.Thread(target=self.rip_announcements, args=(4,)).start()
         threading.Thread(target=self.rip_announcements, args=(5,)).start()
         threading.Thread(target=self.rip_announcements, args=(7,)).start()
+        threading.Thread(target=self.rip_announcements, args=(9,)).start()
+
 
         #Thread para manter uma noção atualizada dos vizinhos que estão ativos
         threading.Thread(target=self.timeouts, args=(4,)).start()
         threading.Thread(target=self.timeouts, args=(5,)).start()
         threading.Thread(target=self.timeouts, args=(7,)).start()
+        threading.Thread(target=self.timeouts, args=(9,)).start()
 
     def timeouts(self, id):
 
@@ -485,7 +506,7 @@ class Router(app_manager.RyuApp):
 
                 #Se já houver uma rota e o custo for superior 
                 if ip in comp and dados[0]+1 == comp[ip][0]:
-
+                    pass
                 
                 elif (ip in comp and dados[0]+1 < comp[ip][0]):
                     self.rotas[id][ip] = [dados[0]+1, source, port]   

@@ -44,6 +44,10 @@ class Topologia(Topo):
         
         h18 = self.addHost('h18', ip="10.0.14.18/24", defaultRoute = "via 10.0.14.254")
         h19 = self.addHost('h19', ip="10.0.14.19/24", defaultRoute = "via 10.0.14.254")
+        h20 = self.addHost('h20', ip="10.0.14.20/24", defaultRoute = "via 10.0.14.254")
+        
+        h21 = self.addHost('h21', ip="10.0.15.21/24", defaultRoute = "via 10.0.15.254")
+        h22 = self.addHost('h22', ip="10.0.15.22/24", defaultRoute = "via 10.0.15.254")
         
         # Adding switches
         s1 = self.addSwitch('s1', dpid="0000000000000001", protocols="OpenFlow13")
@@ -57,7 +61,8 @@ class Topologia(Topo):
         s9 = self.addSwitch('s9', dpid="0000000000000009", protocols="OpenFlow13")
         s10 = self.addSwitch('s10', dpid="0000000000000010", protocols="OpenFlow13")
         s11 = self.addSwitch('s11', dpid="0000000000000011", protocols="OpenFlow13")
-        
+        s12 = self.addSwitch('s12', dpid="0000000000000012", protocols="OpenFlow13")
+
         # Add links
         self.addLink(h1, s1)
         self.addLink(h2, s1)
@@ -90,10 +95,10 @@ class Topologia(Topo):
         self.addLink(s8, h12)
         self.addLink(s8, h13)
         
-        self.addLink(s7, s9)
+        self.addLink(s7, s10)
 
-        self.addLink(s9, h14)
-        self.addLink(s9, h15)
+        self.addLink(s10, h14)
+        self.addLink(s10, h15)
         
         self.addLink(s5, h16)
 
@@ -101,10 +106,19 @@ class Topologia(Topo):
 
         self.addLink(s7, s4)
 
-        self.addLink(s5, s10)
-        self.addLink(s7, s10)
+        self.addLink(s5, s9)
+        self.addLink(s7, s9)
 
-        self.addLink(s10, s11)
+        self.addLink(s9, s11)
+
+        self.addLink(s9, s12)
 
         self.addLink(s11, h18)
         self.addLink(s11, h19)
+        self.addLink(s11, h20)
+
+        self.addLink(s12, h21)
+        self.addLink(s12, h22)
+        
+        
+        
