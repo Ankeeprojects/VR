@@ -165,7 +165,7 @@ class Router(app_manager.RyuApp):
                     #Apagar rotas provenientes deste vizinho e enviar um flowmod para remover
                     to_delete_routes = []
                     for rota, info in self.rotas[id].items():
-                        if info[1] == vizinho:
+                        if vizinho in info[1]:
                             match =  self.routers[id].ofproto_parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP,
                                                     ipv4_dst=rota,
                                                     ip_proto=1)
@@ -175,7 +175,12 @@ class Router(app_manager.RyuApp):
 
                     if to_delete_routes:    
                         for item in to_delete_routes:
-                            self.rotas[id].pop(item)
+                            caminhos = self.rotas[id]
+                            caminhos[item][1].remove(vizinho)
+                            caminhos[item][2].pop(vizinho)
+
+                            if len(caminhos[1]) == 0:
+                                caminhos.pop(item)
                         to_delete.add(vizinho)
 
             if to_delete:
@@ -215,7 +220,14 @@ class Router(app_manager.RyuApp):
 
                 if rotas is not None:
                     #Inclui as rotas como payload
-                    p.add_protocol(json.dumps(rotas).encode('utf-8'))
+                    payload = dict()
+
+                    #payload = {entrada, info[0] for entrada, info in rotas.items()}
+                    for entrada, info in rotas.items():
+                        payload[entrada] = info[0]
+
+
+                    p.add_protocol(json.dumps(payload).encode('utf-8'))
                 
                 p.serialize()
 
@@ -367,7 +379,7 @@ class Router(app_manager.RyuApp):
                 datapath.ofproto_parser.OFPActionOutput(in_port, 0)]
 
         #A rota para este destino é adicionada à tabela: (custo, prox hop, interface)
-        self.rotas[datapath.id][arp_packet.src_ip] = (1, arp_packet.src_ip, in_port)
+        self.rotas[datapath.id][arp_packet.src_ip] = [1, arp_packet.src_ip, in_port]
         
         self.logger.info(f"TABELA DE ENCAMINHAMENTO DO {datapath.id}: {self.rotas[datapath.id]}")
 
@@ -505,7 +517,7 @@ class Router(app_manager.RyuApp):
                 comp = self.rotas[id]
 
                 #Se já houver uma rota e o custo for igual
-                if ip in comp and dados[0]+1 == comp[ip][0]:
+                if ip in comp and dados+1 == comp[ip][0] and source not in comp[ip][2]:
                     datapath = self.routers[id]
                     
                     src_mac = self.find_mac(id, ip)
@@ -516,23 +528,44 @@ class Router(app_manager.RyuApp):
                         datapath.ofproto_parser.OFPActionOutput(port, 0)
                         ]
 
-                    self.logger.info(f"Sou o router {id} e vou meter um flow para o grupo {comp[ip][3]} para o {ip}")
-                    bucket = [datapath.ofproto_parser.OFPBucket(
-                                weight=1,
+                    self.logger.info(f"Sou o router {id} e vou meter um flow igual para o grupo {comp[ip][3]} para o {ip}")
+                    
+                    buckets = [datapath.ofproto_parser.OFPBucket(
+                                weight=101,
                                 watch_port=0,
                                 watch_group=0,
                                 actions=bucket_actions
                                 )]
                     
-                    group = datapath.ofproto_parser.OFPGroupMod(datapath, 1, 1, comp[ip][3], bucket)
+                    for end, bucket_info in comp[ip][2].items():
+                        bucket_actions = [ 
+                            datapath.ofproto_parser.OFPActionSetField(eth_dst=bucket_info[0]),
+                            datapath.ofproto_parser.OFPActionSetField(eth_src=bucket_info[1]),
+                            datapath.ofproto_parser.OFPActionOutput(bucket_info[2], 0)
+                            ]
+
+                        bucket = datapath.ofproto_parser.OFPBucket(
+                            weight=100,
+                            watch_port=bucket_info[2],
+                            watch_group=datapath.ofproto.OFPG_ANY,
+                            actions=bucket_actions
+                            )
+
+                        buckets.append(bucket)
+
+                    self.logger.info(f"Sou o dispositivo {datapath.id} e tenho dois paths para {ip} = {buckets}")
+
+                    group = datapath.ofproto_parser.OFPGroupMod(datapath, 1, 1, comp[ip][3], buckets)
+
+                    comp[ip][1].add(source)
+                    comp[ip][2][source] = buckets
 
                     datapath.send_msg(group)
 
                 
-                elif (ip in comp and dados[0]+1 < comp[ip][0]):
-                    self.rotas[id][ip] = [dados[0]+1, source, port]   
+                elif (ip in comp and dados+1 < comp[ip][0]):   
                     
-                    self.logger.info(f"SOU O {datapath.id} E RECEBI UMA ROTA MELHOR DO {source}: {ip} com custo {dados[0]+1}") 
+                    self.logger.info(f"SOU O {datapath.id} E RECEBI UMA ROTA MELHOR DO {source}: {ip} com custo {dados+1}") 
                     
                     src_mac = self.find_mac(id, ip)
 
@@ -556,8 +589,6 @@ class Router(app_manager.RyuApp):
                     match =  datapath.ofproto_parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP,
                                                         ipv4_dst=ip)
 
-                    self.rotas[id][ip] = [dados[0]+1, source, port, self.groupID[id]]
-
                     src_mac = self.find_mac(id, ip)
 
                     bucket_actions = [ 
@@ -569,11 +600,13 @@ class Router(app_manager.RyuApp):
                     actions = [datapath.ofproto_parser.OFPActionGroup(self.groupID[id])]
 
                     bucket = [datapath.ofproto_parser.OFPBucket(
-                                weight=1,
-                                watch_port=0,
-                                watch_group=0,
+                                weight=100,
+                                watch_port=port,
+                                watch_group=datapath.ofproto.OFPG_ANY,
                                 actions=bucket_actions
                                 )]
+                    
+                    self.rotas[id][ip] = [dados+1, {source}, {source:[dst_mac, src_mac, port]}, self.groupID[id]]
                     
                     group = datapath.ofproto_parser.OFPGroupMod(datapath, 0, 1, self.groupID[id], bucket)
 
