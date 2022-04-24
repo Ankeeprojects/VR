@@ -133,6 +133,9 @@ class Router(app_manager.RyuApp):
             self.changes[id] = 0
             self.groupID[id] = 1
         
+        #Lista de endereços que podem ser distribuídos
+        self.allowed_addresses = ['10.0.2.1', '10.0.5.11', '10.0.7.12']
+        
         #Thread para controlar os anúncios do protocolo de encaminhamento
         threading.Thread(target=self.rip_announcements, args=(4,)).start()
         threading.Thread(target=self.rip_announcements, args=(5,)).start()
@@ -279,6 +282,33 @@ class Router(app_manager.RyuApp):
                         ipv4_dst=('10.0.0.0','255.255.252.0'), ipv4_src=('10.0.0.0', '255.255.0.0'))
             
             self.add_flow(datapath, 19999, match, actions)
+        elif datapath.id == 5:
+            match = parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP,
+                        ipv4_dst=('10.0.5.0','255.255.255.0'), ipv4_src=('10.0.5.0', '255.255.255.0')) 
+            self.add_flow(datapath, 35000, match, actions)
+
+            match = parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP,
+                        ipv4_dst=('10.0.5.0','255.255.255.0'), ipv4_src=('10.0.9.0', '255.255.255.0')) 
+            self.add_flow(datapath, 35000, match, actions)
+
+            match = parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP,
+                        ipv4_dst=('10.0.9.0','255.255.255.0'), ipv4_src=('10.0.9.0', '255.255.255.0')) 
+            self.add_flow(datapath, 35000, match, actions)
+
+            match = parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP,
+                        ipv4_dst=('10.0.9.0','255.255.255.0'), ipv4_src=('10.0.5.0', '255.255.255.0')) 
+            self.add_flow(datapath, 35000, match, actions)
+
+            match = parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP,
+                        ipv4_dst=('10.0.9.0','255.255.255.0'), ipv4_src=('10.0.9.0', '255.255.255.0')) 
+            self.add_flow(datapath, 35000, match, actions)
+
+            actions = []
+
+            match = parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP,
+                        ipv4_dst=('10.0.0.0','255.255.0.0'), ipv4_src=('10.0.0.0', '255.255.0.0'))
+            
+            self.add_flow(datapath, 19999, match, actions)
 
     #Define o que acontece quando o controller recebe um pacote
     @set_ev_cls(ofp_event.EventOFPPacketIn, MAIN_DISPATCHER)
@@ -393,7 +423,8 @@ class Router(app_manager.RyuApp):
                 datapath.ofproto_parser.OFPActionOutput(in_port, 0)]
 
         #A rota para este destino é adicionada à tabela: (custo, prox hop, interface)
-        self.rotas[datapath.id][arp_packet.src_ip] = [1, arp_packet.src_ip, in_port]
+        if ip in self.allowed_addresses:
+            self.rotas[datapath.id][arp_packet.src_ip] = [1, arp_packet.src_ip, in_port]
         
         self.logger.info(f"TABELA DE ENCAMINHAMENTO DO {datapath.id}: {self.rotas[datapath.id]}")
 
@@ -584,7 +615,7 @@ class Router(app_manager.RyuApp):
                     src_mac = self.find_mac(id, ip)
 
                     match =  datapath.ofproto_parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP,
-                                                        ipv4_dst=ip, tcp_src=5555)
+                                                        ipv4_dst=ip, tcp_dst=5555)
 
                     actions = [ 
                         datapath.ofproto_parser.OFPActionSetField(eth_dst=dst_mac),
@@ -592,13 +623,6 @@ class Router(app_manager.RyuApp):
                         datapath.ofproto_parser.OFPActionOutput(port, 0)]
 
                     #removemos o flow anterior para que o melhor caminho seja o escolhido
-                    self.remove_flow(self.routers[id], 0, match, [])
-                                        
-                    self.add_flow(self.routers[id], 32769, match, actions) 
-
-                    match =  datapath.ofproto_parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP,
-                                                        ipv4_dst=ip, tcp_dst=5555)
-
                     self.remove_flow(self.routers[id], 0, match, [])
                                         
                     self.add_flow(self.routers[id], 32769, match, actions) 
