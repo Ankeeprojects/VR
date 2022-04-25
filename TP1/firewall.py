@@ -134,8 +134,8 @@ class Router(app_manager.RyuApp):
             self.groupID[id] = 1
         
         #Lista de endereços que podem ser distribuídos
-        self.allowed_addresses = ['10.0.2.1', '10.0.5.11', '10.0.7.12']
-        
+        #self.allowed_addresses = [ipaddress.IPv4Address('10.0.2.1'), ipaddress.IPv4Address('10.0.5.11'), ipaddress.IPv4Address('10.0.7.12')]
+
         #Thread para controlar os anúncios do protocolo de encaminhamento
         threading.Thread(target=self.rip_announcements, args=(4,)).start()
         threading.Thread(target=self.rip_announcements, args=(5,)).start()
@@ -270,11 +270,11 @@ class Router(app_manager.RyuApp):
         self.add_flow(datapath, 0, match, actions)
 
         #Definições para Firewall:
-
+        
         if datapath.id == 4:
             match = parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP,
                         ipv4_dst=('10.0.0.0','255.255.252.0'), ipv4_src=('10.0.0.0', '255.255.252.0')) 
-            self.add_flow(datapath, 35000, match, actions)
+            self.add_flow(datapath, 30000, match, actions)
 
             actions = []
 
@@ -282,26 +282,27 @@ class Router(app_manager.RyuApp):
                         ipv4_dst=('10.0.0.0','255.255.252.0'), ipv4_src=('10.0.0.0', '255.255.0.0'))
             
             self.add_flow(datapath, 19999, match, actions)
+        
         elif datapath.id == 5:
             match = parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP,
                         ipv4_dst=('10.0.5.0','255.255.255.0'), ipv4_src=('10.0.5.0', '255.255.255.0')) 
-            self.add_flow(datapath, 35000, match, actions)
+            self.add_flow(datapath, 30000, match, actions)
 
             match = parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP,
                         ipv4_dst=('10.0.5.0','255.255.255.0'), ipv4_src=('10.0.9.0', '255.255.255.0')) 
-            self.add_flow(datapath, 35000, match, actions)
+            self.add_flow(datapath, 30000, match, actions)
 
             match = parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP,
                         ipv4_dst=('10.0.9.0','255.255.255.0'), ipv4_src=('10.0.9.0', '255.255.255.0')) 
-            self.add_flow(datapath, 35000, match, actions)
+            self.add_flow(datapath, 30000, match, actions)
 
             match = parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP,
                         ipv4_dst=('10.0.9.0','255.255.255.0'), ipv4_src=('10.0.5.0', '255.255.255.0')) 
-            self.add_flow(datapath, 35000, match, actions)
+            self.add_flow(datapath, 30000, match, actions)
 
             match = parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP,
                         ipv4_dst=('10.0.9.0','255.255.255.0'), ipv4_src=('10.0.9.0', '255.255.255.0')) 
-            self.add_flow(datapath, 35000, match, actions)
+            self.add_flow(datapath, 30000, match, actions)
 
             actions = []
 
@@ -309,7 +310,7 @@ class Router(app_manager.RyuApp):
                         ipv4_dst=('10.0.0.0','255.255.0.0'), ipv4_src=('10.0.0.0', '255.255.0.0'))
             
             self.add_flow(datapath, 19999, match, actions)
-
+        
     #Define o que acontece quando o controller recebe um pacote
     @set_ev_cls(ofp_event.EventOFPPacketIn, MAIN_DISPATCHER)
     def _packet_in_handler(self, ev):
@@ -423,8 +424,8 @@ class Router(app_manager.RyuApp):
                 datapath.ofproto_parser.OFPActionOutput(in_port, 0)]
 
         #A rota para este destino é adicionada à tabela: (custo, prox hop, interface)
-        if ip in self.allowed_addresses:
-            self.rotas[datapath.id][arp_packet.src_ip] = [1, arp_packet.src_ip, in_port]
+        #if arp_packet.src_ip in self.allowed_addresses:
+        self.rotas[datapath.id][arp_packet.src_ip] = [1, arp_packet.src_ip, in_port]
         
         self.logger.info(f"TABELA DE ENCAMINHAMENTO DO {datapath.id}: {self.rotas[datapath.id]}")
 
@@ -555,6 +556,121 @@ class Router(app_manager.RyuApp):
         
         datapath.send_msg(flow_mod)
     
+    """
+    #Averigua se o dicionário de rotas contém alguma melhor do que as que já existem/alguma rota nova
+    def add_rotas(self, rotas : dict, id : int, source : str, dst_mac,  port : int):
+        if rotas is not None:
+            for ip, dados in rotas.items():
+                comp = self.rotas[id]
+
+                #Se já houver uma rota e o custo for igual
+                if ip in comp and dados+1 == comp[ip][0] and source not in comp[ip][2]:
+                    datapath = self.routers[id]
+                    
+                    src_mac = self.find_mac(id, ip)
+                    
+                    bucket_actions = [ 
+                        datapath.ofproto_parser.OFPActionSetField(eth_dst=dst_mac),
+                        datapath.ofproto_parser.OFPActionSetField(eth_src=src_mac),
+                        datapath.ofproto_parser.OFPActionOutput(port, 0)
+                        ]
+
+                    self.logger.info(f"Sou o router {id} e vou meter um flow igual para o grupo {comp[ip][3]} para o {ip}")
+                    
+                    buckets = [datapath.ofproto_parser.OFPBucket(
+                                weight=101,
+                                watch_port=0,
+                                watch_group=0,
+                                actions=bucket_actions
+                                )]
+                    
+                    for end, bucket_info in comp[ip][2].items():
+                        bucket_actions = [ 
+                            datapath.ofproto_parser.OFPActionSetField(eth_dst=bucket_info[0]),
+                            datapath.ofproto_parser.OFPActionSetField(eth_src=bucket_info[1]),
+                            datapath.ofproto_parser.OFPActionOutput(bucket_info[2], 0)
+                            ]
+
+                        bucket = datapath.ofproto_parser.OFPBucket(
+                            weight=100,
+                            watch_port=bucket_info[2],
+                            watch_group=datapath.ofproto.OFPG_ANY,
+                            actions=bucket_actions
+                            )
+
+                        buckets.append(bucket)
+
+                    self.logger.info(f"Sou o dispositivo {datapath.id} e tenho dois paths para {ip} = {buckets}")
+
+                    group = datapath.ofproto_parser.OFPGroupMod(datapath, 1, 1, comp[ip][3], buckets)
+
+                    comp[ip][1].add(source)
+                    comp[ip][2][source] = buckets
+
+                    datapath.send_msg(group)
+
+                
+                elif (ip in comp and dados+1 < comp[ip][0]):   
+                    
+                    self.logger.info(f"SOU O {datapath.id} E RECEBI UMA ROTA MELHOR DO {source}: {ip} com custo {dados+1}") 
+                    
+                    src_mac = self.find_mac(id, ip)
+
+                    self.rotas[id][ip] = [dados+1, {source}, {source:[dst_mac, src_mac, port]}, self.groupID[id]]
+                    
+                    match =  datapath.ofproto_parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP,
+                                                        ipv4_dst=ip, tcp_dst=5555)
+
+                    actions = [ 
+                        datapath.ofproto_parser.OFPActionSetField(eth_dst=dst_mac),
+                        datapath.ofproto_parser.OFPActionSetField(eth_src=src_mac),
+                        datapath.ofproto_parser.OFPActionOutput(port, 0)]
+
+                    #removemos o flow anterior para que o melhor caminho seja o escolhido
+                    self.remove_flow(self.routers[id], 0, match, [])
+                                        
+                    self.add_flow(self.routers[id], 32769, match, actions) 
+
+                    self.changes[id] = 1               
+                elif ip not in comp:
+                    datapath = self.routers[id]
+                    
+                    match =  datapath.ofproto_parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP,
+                                                        ipv4_dst=ip, tcp_dst=5555)
+
+                    src_mac = self.find_mac(id, ip)
+
+                    bucket_actions = [ 
+                        datapath.ofproto_parser.OFPActionSetField(eth_dst=dst_mac),
+                        datapath.ofproto_parser.OFPActionSetField(eth_src=src_mac),
+                        datapath.ofproto_parser.OFPActionOutput(port, 0)
+                        ]
+
+                    actions = [datapath.ofproto_parser.OFPActionGroup(self.groupID[id])]
+
+                    bucket = [datapath.ofproto_parser.OFPBucket(
+                                weight=100,
+                                watch_port=port,
+                                watch_group=datapath.ofproto.OFPG_ANY,
+                                actions=bucket_actions
+                                )]
+                    
+                    self.rotas[id][ip] = [dados+1, {source}, {source:[dst_mac, src_mac, port]}, self.groupID[id]]
+                    
+                    self.logger.info(f"\n\nA CENA NOVA É {self.rotas[id][ip]}\n\n")
+
+                    group = datapath.ofproto_parser.OFPGroupMod(datapath, 0, 1, self.groupID[id], bucket)
+
+                    datapath.send_msg(group)
+
+                    self.groupID[id]+=1
+
+                    self.add_flow(self.routers[id], 32769, match, actions)
+
+                    self.changes[id] = 1
+    """
+
+
     #Averigua se o dicionário de rotas contém alguma melhor do que as que já existem/alguma rota nova
     def add_rotas(self, rotas : dict, id : int, source : str, dst_mac,  port : int):
         if rotas is not None:
@@ -615,7 +731,7 @@ class Router(app_manager.RyuApp):
                     src_mac = self.find_mac(id, ip)
 
                     match =  datapath.ofproto_parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP,
-                                                        ipv4_dst=ip, tcp_dst=5555)
+                                                        ipv4_dst=ip)
 
                     actions = [ 
                         datapath.ofproto_parser.OFPActionSetField(eth_dst=dst_mac),
@@ -632,7 +748,7 @@ class Router(app_manager.RyuApp):
                     datapath = self.routers[id]
                     
                     match =  datapath.ofproto_parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP,
-                                                        ipv4_dst=ip, tcp_dst=5555)
+                                                        ipv4_dst=ip, ip_proto=6, tcp_dst=5555)
 
                     src_mac = self.find_mac(id, ip)
 
@@ -662,7 +778,6 @@ class Router(app_manager.RyuApp):
                     self.add_flow(self.routers[id], 32769, match, actions)
 
                     self.changes[id] = 1
-
     #Encontra o endereço MAC da interface do dispositivo nessa subrede, devolve um endereço genérico se esta não existir
     def find_mac(self, id, ip_dst):
         for vals in self.arp_helper[id]:
