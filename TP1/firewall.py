@@ -311,6 +311,66 @@ class Router(app_manager.RyuApp):
             
             self.add_flow(datapath, 19999, match, actions)
         
+        elif datapath.id == 9:
+            match = parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP,
+                        ipv4_dst=('10.0.14.0','255.255.255.0'), ipv4_src=('10.0.14.0', '255.255.255.0')) 
+            self.add_flow(datapath, 30000, match, actions)
+
+            match = parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP,
+                        ipv4_dst=('10.0.14.0','255.255.255.0'), ipv4_src=('10.0.15.0', '255.255.255.0')) 
+            self.add_flow(datapath, 30000, match, actions)
+            
+            match = parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP,
+                        ipv4_dst=('10.0.15.0','255.255.255.0'), ipv4_src=('10.0.14.0', '255.255.255.0')) 
+            self.add_flow(datapath, 30000, match, actions)
+            
+            match = parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP,
+                        ipv4_dst=('10.0.15.0','255.255.255.0'), ipv4_src=('10.0.15.0', '255.255.255.0')) 
+            self.add_flow(datapath, 30000, match, actions)
+            
+            actions = []
+
+            match = parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP,
+                        ipv4_dst=('10.0.0.0','255.255.0.0'), ipv4_src=('10.0.0.0', '255.255.0.0'))
+            
+            self.add_flow(datapath, 19999, match, actions)
+        else:
+            match = parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP,
+                        ipv4_dst=('10.0.10.0','255.255.255.0'), ipv4_src=('10.0.10.0', '255.255.255.0')) 
+            self.add_flow(datapath, 30000, match, actions)
+
+            match = parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP,
+                        ipv4_dst=('10.0.10.0','255.255.255.0'), ipv4_src=('10.0.7.0', '255.255.255.0')) 
+            self.add_flow(datapath, 30000, match, actions)
+            
+            match = parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP,
+                        ipv4_dst=('10.0.10.0','255.255.255.0'), ipv4_src=('10.0.8.0', '255.255.255.0')) 
+            self.add_flow(datapath, 30000, match, actions)
+            
+            match = parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP,
+                        ipv4_dst=('10.0.7.0','255.255.255.0'), ipv4_src=('10.0.10.0', '255.255.255.0')) 
+            self.add_flow(datapath, 30000, match, actions)
+            
+            match = parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP,
+                        ipv4_dst=('10.0.7.0','255.255.255.0'), ipv4_src=('10.0.7.0', '255.255.255.0')) 
+            self.add_flow(datapath, 30000, match, actions)
+            
+            match = parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP,
+                        ipv4_dst=('10.0.7.0','255.255.255.0'), ipv4_src=('10.0.8.0', '255.255.255.0')) 
+            self.add_flow(datapath, 30000, match, actions)
+            
+            match = parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP,
+                        ipv4_dst=('10.0.8.0','255.255.255.0'), ipv4_src=('10.0.10.0', '255.255.255.0')) 
+            self.add_flow(datapath, 30000, match, actions)
+            
+            match = parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP,
+                        ipv4_dst=('10.0.8.0','255.255.255.0'), ipv4_src=('10.0.7.0', '255.255.255.0')) 
+            self.add_flow(datapath, 30000, match, actions)
+            
+            match = parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP,
+                        ipv4_dst=('10.0.8.0','255.255.255.0'), ipv4_src=('10.0.8.0', '255.255.255.0')) 
+            self.add_flow(datapath, 30000, match, actions)
+            
     #Define o que acontece quando o controller recebe um pacote
     @set_ev_cls(ofp_event.EventOFPPacketIn, MAIN_DISPATCHER)
     def _packet_in_handler(self, ev):
