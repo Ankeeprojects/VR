@@ -134,7 +134,7 @@ class Router(app_manager.RyuApp):
             self.groupID[id] = 1
         
         #Lista de endereços que podem ser distribuídos
-        #self.allowed_addresses = [ipaddress.IPv4Address('10.0.2.1'), ipaddress.IPv4Address('10.0.5.11'), ipaddress.IPv4Address('10.0.7.12')]
+        self.allowed_addresses = ['10.0.2.1', '10.0.5.11', '10.0.7.12']
 
         #Thread para controlar os anúncios do protocolo de encaminhamento
         threading.Thread(target=self.rip_announcements, args=(4,)).start()
@@ -484,8 +484,8 @@ class Router(app_manager.RyuApp):
                 datapath.ofproto_parser.OFPActionOutput(in_port, 0)]
 
         #A rota para este destino é adicionada à tabela: (custo, prox hop, interface)
-        #if arp_packet.src_ip in self.allowed_addresses:
-        self.rotas[datapath.id][arp_packet.src_ip] = [1, arp_packet.src_ip, in_port]
+        if arp_packet.src_ip in self.allowed_addresses:
+            self.rotas[datapath.id][arp_packet.src_ip] = [1, arp_packet.src_ip, in_port]
         
         self.logger.info(f"TABELA DE ENCAMINHAMENTO DO {datapath.id}: {self.rotas[datapath.id]}")
 
