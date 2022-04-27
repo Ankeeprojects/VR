@@ -727,6 +727,7 @@ class Router(app_manager.RyuApp):
                         datapath.ofproto_parser.OFPActionOutput(port, 0)
                         ]
 
+                    #A action do flowmod indica qual o grupo cujos buckets deve utilizar
                     actions = [datapath.ofproto_parser.OFPActionGroup(self.groupID[id])]
 
                     bucket = [datapath.ofproto_parser.OFPBucket(
@@ -736,8 +737,10 @@ class Router(app_manager.RyuApp):
                                 actions=bucket_actions
                                 )]
                     
+                    #nova rota é adicionada à tabela
                     self.rotas[id][ip] = [dados+1, {source}, {source:[dst_mac, src_mac, port]}, self.groupID[id]]
                     
+                    #Cria um grupo novo, para conter o bucket
                     group = datapath.ofproto_parser.OFPGroupMod(datapath, 0, 1, self.groupID[id], bucket)
 
                     datapath.send_msg(group)
@@ -747,6 +750,8 @@ class Router(app_manager.RyuApp):
                     self.add_flow(self.routers[id], 32769, match, actions)
 
                     self.changes[id] = 1
+
+                    
     #Encontra o endereço MAC da interface do dispositivo nessa subrede, devolve um endereço genérico se esta não existir
     def find_mac(self, id, ip_dst):
         for vals in self.arp_helper[id]:
