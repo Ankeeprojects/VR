@@ -136,6 +136,8 @@ class Router(app_manager.RyuApp):
         #Lista de endereços que podem ser distribuídos
         self.allowed_addresses = ['10.0.2.1', '10.0.5.11', '10.0.7.12']
 
+        self.http_server = '10.0.7.12'
+
         #Thread para controlar os anúncios do protocolo de encaminhamento
         threading.Thread(target=self.rip_announcements, args=(4,)).start()
         threading.Thread(target=self.rip_announcements, args=(5,)).start()
@@ -807,8 +809,12 @@ class Router(app_manager.RyuApp):
                 elif ip not in comp:
                     datapath = self.routers[id]
                     
-                    match =  datapath.ofproto_parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP,
+                    if ip == self.http_server:
+                        match =  datapath.ofproto_parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP,
                                                         ipv4_dst=ip, ip_proto=6, tcp_dst=5555)
+                    else:
+                        match =  datapath.ofproto_parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP,
+                                                        ipv4_dst=ip, ip_proto=6, tcp_src=5555)
 
                     src_mac = self.find_mac(id, ip)
 
