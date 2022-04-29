@@ -376,6 +376,7 @@ class Router(app_manager.RyuApp):
         actions = [ 
                 datapath.ofproto_parser.OFPActionSetField(eth_src=arp_packet.dst_mac),
                 datapath.ofproto_parser.OFPActionSetField(eth_dst=arp_packet.src_mac),
+                datapath.ofproto_parser.OFPActionDecNwTtl(),
                 datapath.ofproto_parser.OFPActionOutput(in_port, 0)]
 
         #A rota para este destino é adicionada à tabela: (custo, prox hop, interface)
@@ -398,6 +399,7 @@ class Router(app_manager.RyuApp):
         actions = [ 
                 datapath.ofproto_parser.OFPActionSetField(eth_dst=dst_mac),
                 datapath.ofproto_parser.OFPActionSetField(eth_src=src_mac),
+                datapath.ofproto_parser.OFPActionDecNwTtl(),
                 datapath.ofproto_parser.OFPActionOutput(in_port, 0)]
 
         out = datapath.ofproto_parser.OFPPacketOut(
@@ -525,6 +527,7 @@ class Router(app_manager.RyuApp):
                     bucket_actions = [ 
                         datapath.ofproto_parser.OFPActionSetField(eth_dst=dst_mac),
                         datapath.ofproto_parser.OFPActionSetField(eth_src=src_mac),
+                        datapath.ofproto_parser.OFPActionDecNwTtl(),
                         datapath.ofproto_parser.OFPActionOutput(port, 0)
                         ]
 

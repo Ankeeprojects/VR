@@ -484,6 +484,7 @@ class Router(app_manager.RyuApp):
         actions = [ 
                 datapath.ofproto_parser.OFPActionSetField(eth_src=arp_packet.dst_mac),
                 datapath.ofproto_parser.OFPActionSetField(eth_dst=arp_packet.src_mac),
+                datapath.ofproto_parser.OFPActionDecNwTtl(),
                 datapath.ofproto_parser.OFPActionOutput(in_port, 0)]
 
         #A rota para este destino é adicionada à tabela: (custo, prox hop, interface)
@@ -637,6 +638,7 @@ class Router(app_manager.RyuApp):
                     bucket_actions = [ 
                         datapath.ofproto_parser.OFPActionSetField(eth_dst=dst_mac),
                         datapath.ofproto_parser.OFPActionSetField(eth_src=src_mac),
+                        datapath.ofproto_parser.OFPActionDecNwTtl(),
                         datapath.ofproto_parser.OFPActionOutput(port, 0)
                         ]
 
@@ -751,7 +753,7 @@ class Router(app_manager.RyuApp):
 
                     self.changes[id] = 1
 
-                    
+
     #Encontra o endereço MAC da interface do dispositivo nessa subrede, devolve um endereço genérico se esta não existir
     def find_mac(self, id, ip_dst):
         for vals in self.arp_helper[id]:
