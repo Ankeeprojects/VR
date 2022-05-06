@@ -645,7 +645,7 @@ class Router(app_manager.RyuApp):
                     self.logger.info(f"Sou o router {id} e vou meter um flow igual para o grupo {comp[ip][3]} para o {ip}")
                     
                     buckets = [datapath.ofproto_parser.OFPBucket(
-                                weight=101,
+                                weight=100,
                                 watch_port=0,
                                 watch_group=0,
                                 actions=bucket_actions
