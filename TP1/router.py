@@ -422,7 +422,7 @@ class Router(app_manager.RyuApp):
             data=packet)
         datapath.send_msg(out)
 
-    #
+    
     def find_arp(self, datapath, network, packet) -> int:
         for subnet,ip,port in self.arp_helper[datapath.id]:
                 if ipaddress.IPv4Address(network.dst) in ipaddress.IPv4Network(subnet):
@@ -434,7 +434,38 @@ class Router(app_manager.RyuApp):
                     self.send_arp(datapath, network.dst, ip, port, self.interfaces[datapath.id][ip])
                     return port
 
-    
+        
+        #caso não esteja nas suas redes conectadas, a rede é unreachable, envia um pacote icmp com essa informação
+        self.logger.info("CHEGUEI AQUI TALVEZ")
+    	
+        eth = packet.get_protocol(ethernet.ethernet)
+
+        match = datapath.ofproto_parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP, 
+                                                    ipv4_dst=network.dst, 
+                                                    ipv4_src=network.src,
+                                                    ip_proto=1, icmpv4_type=8)
+
+        actions = [ 
+                datapath.ofproto_parser.OFPActionSetField(ipv4_dst=network.src),
+                datapath.ofproto_parser.OFPActionSetField(ipv4_src=network.dst),
+                datapath.ofproto_parser.OFPActionSetField(eth_dst=eth.src),
+                datapath.ofproto_parser.OFPActionSetField(eth_src=eth.dst),
+                datapath.ofproto_parser.OFPActionSetField(icmpv4_type=3),
+                datapath.ofproto_parser.OFPActionSetField(icmpv4_code=1),
+                datapath.ofproto_parser.OFPActionOutput(datapath.ofproto.OFPP_IN_PORT)]
+        
+        self.add_flow(datapath, 32768, match, actions)
+        
+        out = datapath.ofproto_parser.OFPPacketOut(
+            datapath=datapath,
+            buffer_id=0xffffffff,
+            in_port=datapath.ofproto.OFPP_CONTROLLER,
+            actions=actions,
+            data=packet)
+
+        datapath.send_msg(out)
+
+
     #Enviar um pacote ARP REQUEST para pedir o dst_ip
     def send_arp(self, datapath, dst_ip, src_ip, port, src_mac):
         e = ethernet.ethernet(src=src_mac, dst='ff:ff:ff:ff:ff:ff', ethertype=ether.ETH_TYPE_ARP)

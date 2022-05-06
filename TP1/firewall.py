@@ -22,7 +22,7 @@ import datetime
 
 #inicializar ryu em port definida - ryu-manager --ofp-tcp-listen-port 6654 router.py
 
-#verificar flows sudo ovs-ofctl -O OpenFlow13 dumpflows s4
+#verificar flows sudo ovs-ofctl -O OpenFlow13 dump-flows s4
 
 class Router(app_manager.RyuApp):
     OFP_VERSIONS = [ofproto_v1_3.OFP_VERSION]
@@ -553,6 +553,7 @@ class Router(app_manager.RyuApp):
         
         #Endereços IPv4 e MAC são invertidos para responder, e o tipo e código de ICMP alterados para 0 (Reply)
         actions = [ 
+                datapath.ofproto_parser.OFPActionSetField(ipv4_csum=0),
                 datapath.ofproto_parser.OFPActionSetField(ipv4_dst=network.src),
                 datapath.ofproto_parser.OFPActionSetField(ipv4_src=network.dst),
                 datapath.ofproto_parser.OFPActionSetField(eth_dst=eth.src),
