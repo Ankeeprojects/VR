@@ -1,5 +1,10 @@
 TP1
 
+Ping para interface do Switch Layer 3
+
+sudo ryu-manager --ofp-tcp-listen-port 6653 switch.py
+sudo ryu-manager --ofp-tcp-listen-port 6654 router.py
+
 
 
 -----------------------------------------------------------
