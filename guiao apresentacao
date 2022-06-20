@@ -1,12 +1,27 @@
 TP1
 
-Ping para interface do Switch Layer 3
+Ping para interface do Switch Layer 3 (+ checksum)
 
 sudo ryu-manager --ofp-tcp-listen-port 6653 switch.py
 sudo ryu-manager --ofp-tcp-listen-port 6654 router.py
 
+sudo python3 ex2.py
+
+inicializar wireshark em S4, interface 1
+
+Ping de h1 para 10.0.1.254 (s4-eth1)
+
+sudo ovs-ofctl -O OpenFlow13 dump-flows s4
 
 
+
+Ping para dispositivo noutra subrede (h1 para h4,  + TTL)
+
+Aproveitar o exemplo anterior
+
+wireshark em S4-eth1 e h4
+
+sudo ovs-ofctl -O OpenFlow13 dumpflows s4
 -----------------------------------------------------------
 TP2
 
