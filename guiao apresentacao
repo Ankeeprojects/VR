@@ -22,10 +22,20 @@ Aproveitar o exemplo anterior
 wireshark em S4-eth1 e h4
 
 sudo ovs-ofctl -O OpenFlow13 dumpflows s4
+
+host unreachable - h1 ping 42.42.42.42
+
 -----------------------------------------------------------
 TP2
 
+Teste difusão rotas
 
+sudo ryu-manager --ofp-tcp-listen-port 6653 switch.py
+sudo ryu-manager --ofp-tcp-listen-port 6654 router.py
+
+sudo python3 ex2.py
+
+h1 ping h4 (mostrar rotas em S4, e depois em S5/S7)
 
 
 -----------------------------------------------------------
