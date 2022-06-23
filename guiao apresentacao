@@ -28,7 +28,9 @@ host unreachable - h1 ping 42.42.42.42
 -----------------------------------------------------------
 TP2
 
+--------------------
 Teste difusão rotas
+--------------------
 
 sudo ryu-manager --ofp-tcp-listen-port 6653 switch.py
 sudo ryu-manager --ofp-tcp-listen-port 6654 router.py
@@ -46,8 +48,9 @@ h1 ping h13
 
 
 
-
+------------------------
 Teste Tolerância falhas
+------------------------
 
 sudo ryu-manager --ofp-tcp-listen-port 6653 switch.py
 sudo ryu-manager --ofp-tcp-listen-port 6654 router.py
@@ -62,6 +65,38 @@ h1 ping h13
 
 Verificar flow em s4, esperar que falhe e volte, voltar a verificar
 
+
+------------------------
+Teste Load Balancing
+------------------------
+
+sudo ryu-manager --ofp-tcp-listen-port 6653 switch.py
+sudo ryu-manager --ofp-tcp-listen-port 6654 routerte.py
+
+sudo python3 exTP2.py
+
+h1 ping h4
+h18 ping h21
+
+Visualizar flows e grupos
+
+h4 ping h18
+h4 ping h21
+
+Verificar utilização de fluxos em s5 e s7
+
+
+-------------------------
+Firewall
+-------------------------
+
+sudo ryu-manager --ofp-tcp-listen-port 6653 switch.py
+sudo ryu-manager --ofp-tcp-listen-port 6654 firewall.py
+
+sudo python3 exTP2.py
+
+h1 ping h4
+h12 ping h14
 
 -----------------------------------------------------------
 TP3
