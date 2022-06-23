@@ -35,7 +35,32 @@ sudo ryu-manager --ofp-tcp-listen-port 6654 router.py
 
 sudo python3 ex2.py
 
+h1 ping h13
+
 h1 ping h4 (mostrar rotas em S4, e depois em S5/S7)
+
+h13 ping h14
+
+h1 ping h13
+
+
+
+
+
+Teste Tolerância falhas
+
+sudo ryu-manager --ofp-tcp-listen-port 6653 switch.py
+sudo ryu-manager --ofp-tcp-listen-port 6654 router.py
+
+sudo python3 ex3.py
+
+h1 ping h4
+
+h13 ping h14
+
+h1 ping h13
+
+Verificar flow em s4, esperar que falhe e volte, voltar a verificar
 
 
 -----------------------------------------------------------
